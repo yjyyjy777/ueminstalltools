@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/http/httputil"
@@ -136,6 +138,15 @@ const htmlPage = `
 <head>
     <meta charset="UTF-8">
     <title>综合运维平台</title>
+    <script>
+        // 【关键】强制确保 URL 以 / 结尾
+        // 解决 Nginx 反代子路径 (如 /gogogo) 时相对路径加载错误的问题
+        if (!window.location.pathname.endsWith('/') && !window.location.pathname.endsWith('.html')) {
+            var newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "/" + window.location.search;
+            window.history.replaceState(null, null, newUrl);
+            window.location.reload(); 
+        }
+    </script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -322,11 +333,11 @@ const htmlPage = `
        </div>
 
        <div id="bs-rabbitmq" class="sub-panel" style="padding: 0;">
-           <iframe id="frame-rabbitmq" data-src="/api/baseservices/rabbitmq/" class="iframe-container"></iframe>
+           <iframe id="frame-rabbitmq" data-src="api/baseservices/rabbitmq/" class="iframe-container"></iframe>
        </div>
 
        <div id="bs-minio" class="sub-panel" style="padding: 0;">
-           <iframe id="frame-minio" data-src="/api/baseservices/minio/" class="iframe-container"></iframe>
+           <iframe id="frame-minio" data-src="api/baseservices/minio/" class="iframe-container"></iframe>
        </div>
     </div>
 
@@ -337,9 +348,9 @@ const htmlPage = `
                 <table class="about-table">
                     <tbody>
                         <tr><td style="width: 100px;"><strong>作者</strong></td><td>王凯</td></tr>
-                        <tr><td><strong>版本</strong></td><td>3.6 (MinIO Console Fix)</td></tr>
+                        <tr><td><strong>版本</strong></td><td>4.0 (UTF-8 Log Fix & Nginx Proxy Rewrite)</td></tr>
                         <tr><td><strong>更新日期</strong></td><td>2024-07-26</td></tr>
-                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端</li><li>实时查看多种 UEM 服务日志</li><li>基础服务(Redis/MySQL/RabbitMQ/MinIO)监控与管理</li></ul></td></tr>
+                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端</li><li>实时查看多种 UEM 服务日志 (Auto UTF-8 Fix)</li><li>基础服务(Redis/MySQL/RabbitMQ/MinIO)监控与管理</li></ul></td></tr>
                     </tbody>
                 </table>
             </div>
@@ -357,8 +368,10 @@ const htmlPage = `
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
 <script>
-    const API_BASE = "api/"; const UPLOAD_URL = "upload";
-    if (!location.pathname.endsWith('/')) window.location.href = location.pathname + '/' + location.search;
+    // 关键修改：使用相对路径，适应 Nginx 子目录代理 (如 /gogogo/)
+    const API_BASE = "api/"; 
+    const UPLOAD_URL = "upload";
+    
     let deployTerm, sysTerm, deploySocket, sysSocket, deployFit, sysFit, logSocket, currentPath = "/root";
     window.onload = function() { runCheck(); fmLoadPath("/root"); }
     function switchTab(id) {
@@ -400,10 +413,50 @@ const htmlPage = `
            if (!frame.src) frame.src = frame.dataset.src;
        } else if (id === 'bs-minio') {
            const frame = document.getElementById('frame-minio');
-           if (!frame.src) frame.src = frame.dataset.src;
+           if (!frame.src) {
+               frame.src = frame.dataset.src;
+               // Auto Login Injection for MinIO
+               frame.onload = function() {
+                   let attempts = 0;
+                   const interval = setInterval(() => {
+                       attempts++;
+                       if(attempts > 40) clearInterval(interval); // Timeout 20s
+
+                       try {
+                           const doc = frame.contentWindow.document;
+                           // MinIO Console Input IDs usually are accessKey and secretKey
+                           const user = doc.getElementById('accessKey');
+                           const pass = doc.getElementById('secretKey');
+                           const btn = doc.querySelector('button[type="submit"]');
+
+                           if(user && pass && btn) {
+                               // React requires native value setter for input tracking
+                               const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
+                               
+                               nativeInputValueSetter.call(user, 'admin');
+                               user.dispatchEvent(new Event('input', { bubbles: true }));
+                               
+                               nativeInputValueSetter.call(pass, 'Nqsky1130');
+                               pass.dispatchEvent(new Event('input', { bubbles: true }));
+                               
+                               setTimeout(() => { btn.click(); }, 300);
+                               clearInterval(interval);
+                           }
+                       } catch(e) {}
+                   }, 500);
+               };
+           }
        }
     }
-    function getWsUrl(ep) { return (location.protocol==='https:'?'wss://':'ws://') + location.host + location.pathname + ep; }
+    
+    // 动态构建 WebSocket URL，支持相对路径
+    function getWsUrl(ep) { 
+        // 确保 pathname 以 / 结尾
+        let path = location.pathname;
+        if (!path.endsWith('/')) path += '/';
+        return (location.protocol==='https:'?'wss://':'ws://') + location.host + path + ep; 
+    }
+    
     function viewLog(key, el) {
         document.querySelectorAll('.log-item').forEach(l=>l.classList.remove('active')); el.classList.add('active');
         document.getElementById('logTitle').innerText = "Log: " + key;
@@ -847,13 +900,41 @@ func initMySQL() {
 	}
 }
 func setupProxies(basePath string) {
-	// 简单的加载中页面，无多余文字
+	// 简单的加载中页面
 	redirectHTML := `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Loading...</title><style>body{margin:0;display:flex;justify-content:center;align-items:center;height:100vh;background:#f5f7fa;color:#666;font-family:sans-serif;}</style><script>window.location.replace(window.location.pathname + "/");</script></head><body><div style="text-align:center">Loading Interface...</div></body></html>`
 
-	// 定义修改响应头的函数，去除X-Frame-Options以允许iframe嵌入
-	modifyFunc := func(r *http.Response) error {
+	// ==========================================
+	//  核心修复：HTML 路径重写器 (解决 Nginx 反代白屏)
+	// ==========================================
+	rewriteHTML := func(r *http.Response) error {
+		// 1. 删除安全头，允许 iframe 嵌入
 		r.Header.Del("X-Frame-Options")
 		r.Header.Del("Content-Security-Policy")
+
+		// 2. 检查是否为 HTML 内容
+		contentType := r.Header.Get("Content-Type")
+		if strings.Contains(contentType, "text/html") {
+			// 读取响应体
+			bodyBytes, err := ioutil.ReadAll(r.Body)
+			if err != nil {
+				return err
+			}
+			r.Body.Close()
+
+			// 替换绝对路径为相对路径 (src="/ -> src=")
+			// 这会让浏览器基于当前 iframe 的 URL (如 /gogogo/api/baseservices/minio/) 去请求资源
+			// 从而正确经过 Nginx -> Agent -> MinIO 的代理链路
+			bodyString := string(bodyBytes)
+			bodyString = strings.ReplaceAll(bodyString, `src="/`, `src="`)
+			bodyString = strings.ReplaceAll(bodyString, `href="/`, `href="`)
+			bodyString = strings.ReplaceAll(bodyString, `action="/`, `action="`)
+
+			// 重写响应体
+			buf := bytes.NewBufferString(bodyString)
+			r.Body = ioutil.NopCloser(buf)
+			r.ContentLength = int64(buf.Len())
+			r.Header.Set("Content-Length", strconv.Itoa(buf.Len()))
+		}
 		return nil
 	}
 
@@ -861,7 +942,15 @@ func setupProxies(basePath string) {
 	if appConfig.RabbitMQAdminPort > 0 {
 		rabbitURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", appConfig.RabbitMQAdminPort))
 		rabbitProxy := httputil.NewSingleHostReverseProxy(rabbitURL)
-		rabbitProxy.ModifyResponse = modifyFunc
+		rabbitProxy.ModifyResponse = rewriteHTML // 应用重写器
+
+		// 移除 Accept-Encoding 防止后端 gzip 压缩导致我们无法修改 HTML
+		rabbitProxy.Director = func(req *http.Request) {
+			req.URL.Scheme = rabbitURL.Scheme
+			req.URL.Host = rabbitURL.Host
+			req.Header.Del("Accept-Encoding")
+		}
+
 		http.Handle(basePath+"/rabbitmq/", http.StripPrefix(basePath+"/rabbitmq", rabbitProxy))
 		http.HandleFunc(basePath+"/rabbitmq", func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(redirectHTML))
@@ -871,7 +960,6 @@ func setupProxies(basePath string) {
 
 	// MinIO Proxy (Console Port 9001)
 	targetMinio := "http://127.0.0.1:9001"
-	// 如果配置文件中显式配置了URL且端口不是9000（API），则使用配置的
 	if appConfig.MinioURL != "" && !strings.Contains(appConfig.MinioURL, ":9000") {
 		targetMinio = appConfig.MinioURL
 	}
@@ -879,14 +967,19 @@ func setupProxies(basePath string) {
 	minioURL, err := url.Parse(targetMinio)
 	if err == nil {
 		minioProxy := httputil.NewSingleHostReverseProxy(minioURL)
-		minioProxy.ModifyResponse = modifyFunc
+		minioProxy.ModifyResponse = rewriteHTML // 应用重写器
+
+		minioProxy.Director = func(req *http.Request) {
+			req.URL.Scheme = minioURL.Scheme
+			req.URL.Host = minioURL.Host
+			req.Header.Del("Accept-Encoding")
+		}
 
 		// 1. MinIO 基础代理入口
 		http.Handle(basePath+"/minio/", http.StripPrefix(basePath+"/minio", minioProxy))
 
-		// 2. MinIO Console 资源劫持 (解决 Unexpected token < 问题)
-		// MinIO Console 前端使用绝对路径请求资源，导致请求落到 Agent 的 "/" 路由
-		// 这里我们需要把这些特定的资源路径也代理给 MinIO
+		// 2. MinIO Console 资源劫持
+		// 即使我们重写了 HTML，某些 JS 动态请求可能还是绝对路径，或者我们需要处理登录等 API
 		minioAssets := []string{"/static/", "/login", "/api/v1/", "/ws/", "/images/", "/styles/", "/loader.css"}
 		for _, path := range minioAssets {
 			http.Handle(path, minioProxy)
@@ -1433,13 +1526,16 @@ func handleLogWS(w http.ResponseWriter, r *http.Request) {
 		cmd.Wait()
 	}()
 
+	// Fix: Read buffer and clean invalid UTF-8 characters before sending
 	buf := make([]byte, 4096)
 	for {
 		n, err := out.Read(buf)
 		if err != nil {
 			break
 		}
-		if conn.WriteMessage(websocket.TextMessage, buf[:n]) != nil {
+		// Convert possibly invalid UTF-8 bytes to valid string with replacement char
+		validString := strings.ToValidUTF8(string(buf[:n]), "")
+		if conn.WriteMessage(websocket.TextMessage, []byte(validString)) != nil {
 			break
 		}
 	}
