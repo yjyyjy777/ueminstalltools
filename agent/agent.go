@@ -156,7 +156,6 @@ const htmlPage = `
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        /* 全局布局：Flex Column */
         body { font-family: 'Segoe UI', sans-serif; background: #2c3e50; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         .navbar { background: #34495e; padding: 0 20px; height: 50px; display: flex; align-items: center; border-bottom: 1px solid #1abc9c; flex-shrink: 0; }
         .brand { color: #fff; font-weight: bold; font-size: 18px; margin-right: 20px; }
@@ -212,17 +211,12 @@ const htmlPage = `
         .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
         .about-table td { padding: 10px; }
         .about-table tr:not(:last-child) td { border-bottom: 1px solid #f0f0f0; }
-       
-       /* 基础服务子标签样式 */
        .bs-header { padding: 10px 20px; background: #e9ecef; display: flex; gap: 5px; border-bottom: 1px solid #ddd; flex-shrink: 0; }
        .sub-tab-btn { background: #fff; color: #666; border: 1px solid #ddd; padding: 6px 14px; cursor: pointer; border-radius: 4px; font-size: 13px; }
        .sub-tab-btn:hover { background: #f8f9fa; }
        .sub-tab-btn.active { background: #2980b9; color: white; border-color: #2980b9; }
-       
-       /* 子面板样式：撑满剩余空间，内容可滚动 */
        .sub-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; background: #fff; width: 100%; height: 100%; }
        .sub-panel.active { display: flex; }
-       
        .modal-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 100; display: none; }
         .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 101; width: 90%; max-width: 700px; display: none; max-height: 80vh; overflow-y: auto; }
         .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #dee2e6; padding-bottom: 10px; margin-bottom: 20px; }
@@ -231,11 +225,7 @@ const htmlPage = `
         .modal-body { margin-bottom: 20px; }
         .modal-footer { border-top: 1px solid #dee2e6; padding-top: 15px; margin-top: 20px; text-align: right; }
        .list-item, .hash-item { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #e9ecef; }
-       
-       /* iframe 容器：flex: 1 撑满高度，无边框 */
        .iframe-container { flex: 1; width: 100%; height: 100%; border: none; display: block; }
-
-       /* SQL Result Table */
        .sql-table-container { overflow: auto; max-height: 400px; border: 1px solid #ddd; margin-top: 10px; }
        .sql-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: Consolas, monospace; white-space: nowrap; }
        .sql-table th { background: #f8f9fa; position: sticky; top: 0; border-bottom: 2px solid #ddd; padding: 8px; text-align: left; color: #333; }
@@ -274,9 +264,7 @@ const htmlPage = `
             </div>
         </div>
     </div>
-    
     <div id="panel-deps" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card"><h3>💿 ISO 挂载 (配置本地 YUM)</h3><div style="display:flex; flex-direction:column; gap:10px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:80px; color:#666;">上传镜像:</span><input type="file" id="isoInput" accept=".iso" style="width:300px;"><button onclick="mountIso()">上传并挂载</button></div><div style="display:flex; align-items:center; gap:10px;"><span style="width:80px; color:#666;">本地路径:</span><input type="text" id="isoPathInput" placeholder="/tmp/kylin.iso" style="width:300px;"><button class="btn-orange" onclick="mountLocalIso()">使用本地文件</button></div></div><div id="yum-log" class="term-box" style="height:120px;margin-top:10px">等待操作...</div></div><div class="card"><h3>🛠️ RPM 安装</h3><div style="display:flex;gap:10px"><input type="file" id="rpmInput" accept=".rpm"><button onclick="installRpm()">执行安装</button></div><div id="rpm-log" class="term-box" style="height:120px;margin-top:10px"></div></div></div></div>
-    
     <div id="panel-deploy" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card"><h3>📦 系统包上传</h3><div style="display:flex;gap:10px"><input type="file" id="fileInput" accept=".tar.gz"><button onclick="uploadFile()">上传解压</button><span id="uploadStatus" style="font-weight:bold"></span></div></div><div class="card" style="flex:1"><div style="display:flex;justify-content:space-between;margin-bottom:10px;align-items:center"><h3>脚本执行</h3><div style="display:flex;gap:10px"><button id="btnRunInstall" class="btn-green" onclick="startScript('install')" disabled>部署 (install.sh)</button> <button id="btnRunUpdate" class="btn-orange" onclick="startScript('update')" disabled>更新 (mdm.sh)</button></div></div><div id="deploy-term" style="height:400px;background:#000"></div></div></div></div>
     <div id="panel-files" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card" style="height:100%;padding:0"><div style="padding:15px;background:#f8f9fa;border-bottom:1px solid #eee"><div class="fm-toolbar"><button onclick="fmUpDir()">上级</button><button onclick="fmRefresh()">刷新</button><span id="fmPath" style="margin:0 10px;font-weight:bold">/root</span><input type="file" id="fmUploadInput" style="display:none" onchange="fmDoUpload()"><button onclick="document.getElementById('fmUploadInput').click()">上传</button></div><div id="fmStatus" style="font-size:12px;color:#666;height:15px"></div></div><div class="fm-list" style="overflow:auto;height:100%"><table style="width:100%"><tbody id="fmBody"></tbody></table></div></div></div></div>
     <div id="panel-terminal" class="panel"><div id="sys-term" class="full-term" style="height:100vh"></div></div>
@@ -292,14 +280,8 @@ const htmlPage = `
        
        <div id="bs-redis" class="sub-panel active" style="padding: 20px; overflow-y: auto;">
            <div class="container-box" style="padding:0">
-             <div class="card">
-                <h3>Redis 性能指标</h3>
-                <div id="redis-info-grid" class="grid-4">加载中...</div>
-             </div>
-             <div class="card">
-                <h3>键值管理</h3>
-                <div id="redis-keys-table-container">加载中...</div>
-             </div>
+             <div class="card"><h3>Redis 性能指标</h3><div id="redis-info-grid" class="grid-4">加载中...</div></div>
+             <div class="card"><h3>键值管理</h3><div id="redis-keys-table-container">加载中...</div></div>
            </div>
        </div>
 
@@ -325,11 +307,7 @@ const htmlPage = `
                       <div class="card"><h3>表空间占用 (Top 10)</h3><canvas id="mysql-tableSizeChart"></canvas></div>
                       <div class="card"><h3>频繁操作表 (Top 10)</h3><canvas id="mysql-tableOpsChart"></canvas></div>
                    </div>
-                   <div class="card">
-                      <h3>当前进程</h3>
-                      <input id="mysql-slowFilter" placeholder="过滤SQL..." oninput="mysql.loadProcesslist()">
-                       <div style="max-height: 400px; overflow-y: auto;"><table id="mysql-slowQueryTable"><thead><tr><th>Id</th><th>User</th><th>Host</th><th>DB</th><th>Command</th><th>Time(s)</th><th>State</th><th>Info</th></tr></thead><tbody></tbody></table></div>
-                   </div>
+                   <div class="card"><h3>当前进程</h3><input id="mysql-slowFilter" placeholder="过滤SQL..." oninput="mysql.loadProcesslist()"><div style="max-height: 400px; overflow-y: auto;"><table id="mysql-slowQueryTable"><thead><tr><th>Id</th><th>User</th><th>Host</th><th>DB</th><th>Command</th><th>Time(s)</th><th>State</th><th>Info</th></tr></thead><tbody></tbody></table></div></div>
                 </div>
                 <div id="mysql-sql" class="mysql-tab-group" style="display:none;">
                    <h3>执行SQL</h3>
@@ -355,12 +333,7 @@ const htmlPage = `
             <div class="card">
                 <h3>关于智能部署工具</h3>
                 <table class="about-table">
-                    <tbody>
-                        <tr><td style="width: 100px;"><strong>作者</strong></td><td>王凯</td></tr>
-                        <tr><td><strong>版本</strong></td><td>4.5 (Complete Fix)</td></tr>
-                        <tr><td><strong>更新日期</strong></td><td>2024-07-26</td></tr>
-                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li><strong>新功能：实时系统资源（内存/负载）监控图表</strong></li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端</li><li>实时查看多种 UEM 服务日志</li><li>基础服务(Redis/MySQL/RabbitMQ/MinIO)监控与管理</li></ul></td></tr>
-                    </tbody>
+                    <tbody><tr><td style="width: 100px;"><strong>作者</strong></td><td>王凯</td></tr><tr><td><strong>版本</strong></td><td>4.8 (Final)</td></tr><tr><td><strong>更新日期</strong></td><td>2024-07-26</td></tr><tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li><strong>新功能：实时系统资源（内存/负载）监控图表</strong></li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端</li><li>实时查看多种 UEM 服务日志</li><li>基础服务(Redis/MySQL/RabbitMQ/MinIO)监控与管理</li></ul></td></tr></tbody>
                 </table>
             </div>
         </div>
@@ -377,176 +350,33 @@ const htmlPage = `
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
 <script>
-    // 关键修改：使用相对路径，适应 Nginx 子目录代理 (如 /gogogo/)
-    const API_BASE = "api/"; 
-    const UPLOAD_URL = "upload";
-    
+    const API_BASE = "api/"; const UPLOAD_URL = "upload";
     let deployTerm, sysTerm, deploySocket, sysSocket, deployFit, sysFit, logSocket, currentPath = "/root";
-    let sysChart; 
-    let checkInterval;
+    let sysChart; let checkInterval;
 
-    window.onload = function() { 
-        initSysChart();
-        runCheck(); 
-        fmLoadPath("/root");
-        // Start polling check
-        startCheckPolling();
-    }
-
-    function startCheckPolling() {
-        if(checkInterval) clearInterval(checkInterval);
-        checkInterval = setInterval(() => {
-            // Only poll if on check panel
-            if(document.getElementById('panel-check').classList.contains('active')) {
-                runCheck();
-            }
-        }, 3000);
-    }
-
+    window.onload = function() { initSysChart(); runCheck(); fmLoadPath("/root"); startCheckPolling(); }
+    function startCheckPolling() { if(checkInterval) clearInterval(checkInterval); checkInterval = setInterval(() => { if(document.getElementById('panel-check').classList.contains('active')) { runCheck(); } }, 3000); }
     function initSysChart() {
         const ctx = document.getElementById('sysChart').getContext('2d');
-        sysChart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels: [],
-                datasets: [
-                    {
-                        label: '内存使用率 (%)',
-                        data: [],
-                        borderColor: '#e74c3c',
-                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
-                        fill: true,
-                        tension: 0.3
-                    },
-                    {
-                        label: '系统负载 (1min)',
-                        data: [],
-                        borderColor: '#2980b9',
-                        backgroundColor: 'rgba(41, 128, 185, 0.1)',
-                        fill: true,
-                        tension: 0.3,
-                        yAxisID: 'y1'
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                animation: false,
-                interaction: {
-                    mode: 'index',
-                    intersect: false,
-                },
-                scales: {
-                    y: {
-                        beginAtZero: true,
-                        max: 100,
-                        title: { display: true, text: 'Memory %' }
-                    },
-                    y1: {
-                        type: 'linear',
-                        display: true,
-                        position: 'right',
-                        beginAtZero: true,
-                        title: { display: true, text: 'Load Avg' },
-                        grid: {
-                            drawOnChartArea: false, 
-                        },
-                    },
-                    x: {
-                        ticks: { display: false } // Hide time labels for cleaner look
-                    }
-                }
-            }
-        });
+        sysChart = new Chart(ctx, { type: 'line', data: { labels: [], datasets: [ { label: '内存使用率 (%)', data: [], borderColor: '#e74c3c', backgroundColor: 'rgba(231, 76, 60, 0.1)', fill: true, tension: 0.3 }, { label: '系统负载 (1min)', data: [], borderColor: '#2980b9', backgroundColor: 'rgba(41, 128, 185, 0.1)', fill: true, tension: 0.3, yAxisID: 'y1' } ] }, options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false, }, scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: 'Memory %' } }, y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, title: { display: true, text: 'Load Avg' }, grid: { drawOnChartArea: false, }, }, x: { ticks: { display: false } } } } });
     }
-
     function switchTab(id) {
-        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-        document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
         document.getElementById('panel-'+id).classList.add('active'); event.target.classList.add('active');
         if (id === 'terminal') { if (!sysTerm) initSysTerm(); setTimeout(()=>sysFit.fit(), 200); }
         if (id === 'deploy') { setTimeout(()=>deployFit && deployFit.fit(), 200); }
-       if (id === 'baseservices') { redis.init(); mysql.init(); }
+        if (id === 'baseservices') { redis.init(); mysql.init(); }
     }
     function switchSubTab(event, id, isLink, group) {
-       if (isLink) {
-          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-          const mainBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.includes('基础服务'));
-          if(mainBtn) mainBtn.classList.add('active');
-          document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-          document.getElementById('panel-baseservices').classList.add('active');
-       }
-
-       if(group) { // for mysql internal tabs
-           const p = event.target.closest('.card');
-           p.querySelectorAll('.'+group).forEach(x=>x.style.display='none');
-           p.querySelectorAll('.sub-tab-btn').forEach(b=>b.classList.remove('active'));
-           document.getElementById(id).style.display='block';
-           event.target.classList.add('active');
-           return;
-       } else {
-           // Logic to toggle sub-panels inside panel-baseservices
-           const parent = document.getElementById('panel-baseservices');
-           parent.querySelectorAll('.sub-panel').forEach(p => p.classList.remove('active'));
-           parent.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active'));
-           document.getElementById(id).classList.add('active');
-           event.target.classList.add('active');
-       }
-
-       // Lazy load iframes
-       if (id === 'bs-rabbitmq') {
-           const frame = document.getElementById('frame-rabbitmq');
-           if (!frame.src) frame.src = frame.dataset.src;
-       } else if (id === 'bs-minio') {
-           const frame = document.getElementById('frame-minio');
-           if (!frame.src) {
-               frame.src = frame.dataset.src;
-               // Auto Login Injection for MinIO
-               frame.onload = function() {
-                   let attempts = 0;
-                   const interval = setInterval(() => {
-                       attempts++;
-                       if(attempts > 40) clearInterval(interval); // Timeout 20s
-
-                       try {
-                           const doc = frame.contentWindow.document;
-                           // MinIO Console Input IDs usually are accessKey and secretKey
-                           const user = doc.getElementById('accessKey');
-                           const pass = doc.getElementById('secretKey');
-                           const btn = doc.querySelector('button[type="submit"]');
-
-                           if(user && pass && btn) {
-                               // React requires native value setter for input tracking
-                               const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set;
-                               
-                               nativeInputValueSetter.call(user, 'admin');
-                               user.dispatchEvent(new Event('input', { bubbles: true }));
-                               
-                               nativeInputValueSetter.call(pass, 'Nqsky1130');
-                               pass.dispatchEvent(new Event('input', { bubbles: true }));
-                               
-                               setTimeout(() => { btn.click(); }, 300);
-                               clearInterval(interval);
-                           }
-                       } catch(e) {}
-                   }, 500);
-               };
-           }
-       }
+       if (isLink) { document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active')); const mainBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.includes('基础服务')); if(mainBtn) mainBtn.classList.add('active'); document.querySelectorAll('.panel').forEach(p => p.classList.remove('active')); document.getElementById('panel-baseservices').classList.add('active'); }
+       if(group) { const p = event.target.closest('.card'); p.querySelectorAll('.'+group).forEach(x=>x.style.display='none'); p.querySelectorAll('.sub-tab-btn').forEach(b=>b.classList.remove('active')); document.getElementById(id).style.display='block'; event.target.classList.add('active'); return; } 
+       else { const parent = document.getElementById('panel-baseservices'); parent.querySelectorAll('.sub-panel').forEach(p => p.classList.remove('active')); parent.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active')); document.getElementById(id).classList.add('active'); event.target.classList.add('active'); }
+       if (id === 'bs-rabbitmq') { const frame = document.getElementById('frame-rabbitmq'); if (!frame.src) frame.src = frame.dataset.src; } 
+       else if (id === 'bs-minio') { const frame = document.getElementById('frame-minio'); if (!frame.src) { frame.src = frame.dataset.src; frame.onload = function() { let attempts = 0; const interval = setInterval(() => { attempts++; if(attempts > 40) clearInterval(interval); try { const doc = frame.contentWindow.document; const user = doc.getElementById('accessKey'); const pass = doc.getElementById('secretKey'); const btn = doc.querySelector('button[type="submit"]'); if(user && pass && btn) { const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set; nativeInputValueSetter.call(user, 'admin'); user.dispatchEvent(new Event('input', { bubbles: true })); nativeInputValueSetter.call(pass, 'Nqsky1130'); pass.dispatchEvent(new Event('input', { bubbles: true })); setTimeout(() => { btn.click(); }, 300); clearInterval(interval); } } catch(e) {} }, 500); }; } }
     }
-    
-    // 动态构建 WebSocket URL，支持相对路径
-    function getWsUrl(ep) { 
-        // 确保 pathname 以 / 结尾
-        let path = location.pathname;
-        if (!path.endsWith('/')) path += '/';
-        return (location.protocol==='https:'?'wss://':'ws://') + location.host + path + ep; 
-    }
-    
+    function getWsUrl(ep) { let path = location.pathname; if (!path.endsWith('/')) path += '/'; return (location.protocol==='https:'?'wss://':'ws://') + location.host + path + ep; }
     function viewLog(key, el) {
-        document.querySelectorAll('.log-item').forEach(l=>l.classList.remove('active')); el.classList.add('active');
-        document.getElementById('logTitle').innerText = "Log: " + key;
+        document.querySelectorAll('.log-item').forEach(l=>l.classList.remove('active')); el.classList.add('active'); document.getElementById('logTitle').innerText = "Log: " + key;
         const box = document.getElementById('logContent'); box.innerText = "Connecting...\n";
         if(logSocket) logSocket.close();
         logSocket = new WebSocket(getWsUrl("ws/log?key="+key));
@@ -557,28 +387,14 @@ const htmlPage = `
     function clearLog(){ document.getElementById('logContent').innerText=""; }
     async function runCheck() {
         try {
-            // 关键修复：使用 API_BASE 动态拼接
             const resp = await fetch(API_BASE + 'check'); const data = await resp.json();
-            
-            // --- Chart Update Logic ---
             if(sysChart && data.sys_info.mem_usage !== undefined) {
                 const now = new Date().toLocaleTimeString();
-                if(sysChart.data.labels.length > 20) {
-                    sysChart.data.labels.shift();
-                    sysChart.data.datasets.forEach(d => d.data.shift());
-                }
-                sysChart.data.labels.push(now);
-                sysChart.data.datasets[0].data.push(data.sys_info.mem_usage);
-                sysChart.data.datasets[1].data.push(data.sys_info.load_avg);
-                sysChart.update();
+                if(sysChart.data.labels.length > 20) { sysChart.data.labels.shift(); sysChart.data.datasets.forEach(d => d.data.shift()); }
+                sysChart.data.labels.push(now); sysChart.data.datasets[0].data.push(data.sys_info.mem_usage); sysChart.data.datasets[1].data.push(data.sys_info.load_avg); sysChart.update();
             }
-            // --------------------------
-
             let baseHtml = '';
-            baseHtml += row('CPU', data.sys_info.cpu_cores + ' 核', data.sys_info.cpu_pass);
-            baseHtml += row('内存', data.sys_info.mem_total, data.sys_info.mem_pass);
-            baseHtml += row('架构', data.sys_info.arch, true);
-            baseHtml += row('操作系统', data.sys_info.os_name, data.sys_info.os_pass);
+            baseHtml += row('CPU', data.sys_info.cpu_cores + ' 核', data.sys_info.cpu_pass); baseHtml += row('内存', data.sys_info.mem_total, data.sys_info.mem_pass); baseHtml += row('架构', data.sys_info.arch, true); baseHtml += row('操作系统', data.sys_info.os_name, data.sys_info.os_pass);
             baseHtml += '<tr><td>性能(ulimit)</td><td>'+data.sys_info.ulimit+'</td><td>'+(data.sys_info.ulimit_pass?'<span class="pass">OK</span>':'<span class="warn">Opt</span>')+'</td></tr>';
             document.getElementById('baseTable').innerHTML = baseHtml;
             let secHtml = '';
@@ -588,21 +404,11 @@ const htmlPage = `
             secHtml += '<tr><td>SSH隧道</td><td>TCP转发</td><td>'+sshBtn+'</td></tr>';
             document.getElementById('secTable').innerHTML = secHtml;
             let diskHtml = '<div style="display:flex; flex-direction:column; gap:12px;">';
-            data.sys_info.disk_list.forEach(d => {
-                let color = d.usage>=90?'bg-red':(d.usage>=75?'bg-orange':'bg-green');
-                diskHtml += '<div><div style="font-weight:bold;margin-bottom:4px;font-size:13px;">'+d.mount+' <span style="color:#666">('+d.usage+'%)</span></div><div class="progress-bg"><div class="progress-bar '+color+'" style="width:'+d.usage+'%"></div></div><div class="disk-text"><span>'+d.used+'</span><span>'+d.total+'</span></div></div>';
-            });
+            data.sys_info.disk_list.forEach(d => { let color = d.usage>=90?'bg-red':(d.usage>=75?'bg-orange':'bg-green'); diskHtml += '<div><div style="font-weight:bold;margin-bottom:4px;font-size:13px;">'+d.mount+' <span style="color:#666">('+d.usage+'%)</span></div><div class="progress-bg"><div class="progress-bar '+color+'" style="width:'+d.usage+'%"></div></div><div class="disk-text"><span>'+d.used+'</span><span>'+d.total+'</span></div></div>'; });
             document.getElementById('diskList').innerHTML = diskHtml + '</div>';
             const uemBox = document.getElementById('uemStatusBox');
             if (!data.uem_info.installed) { uemBox.innerHTML = '<div style="color:#7f8c8d;text-align:center;padding:20px;">未检测到 UEM</div>'; } 
-            else {
-                let h = '<table style="width:100%"><thead><tr><th>服务</th><th>状态</th><th>操作</th></tr></thead><tbody>';
-                data.uem_info.services.forEach(s => {
-                    let st = s.status==='running'?'<span class="pass">Run</span>':'<span class="fail">Stop</span>';
-                    h += '<tr><td>'+s.name+'</td><td>'+st+'</td><td><button class="btn-sm btn-restart" onclick="restartService(\''+s.name+'\')">重启</button></td></tr>';
-                });
-                uemBox.innerHTML = h + '</tbody></table>';
-            }
+            else { let h = '<table style="width:100%"><thead><tr><th>服务</th><th>状态</th><th>操作</th></tr></thead><tbody>'; data.uem_info.services.forEach(s => { let st = s.status==='running'?'<span class="pass">Run</span>':'<span class="fail">Stop</span>'; h += '<tr><td>'+s.name+'</td><td>'+st+'</td><td><button class="btn-sm btn-restart" onclick="restartService(\''+s.name+'\')">重启</button></td></tr>'; }); uemBox.innerHTML = h + '</tbody></table>'; }
             let mHtml = !data.minio_info.bucket_exists ? '<tr><td>Err</td><td colspan="2">桶不存在/未连接</td></tr>' : '<tr><td>nqsky</td><td>'+data.minio_info.policy+'</td><td>'+(data.minio_info.policy==='public'?'<span class="pass">OK</span>':'<button class="btn-sm btn-fix" onclick="fixMinio()">Public</button>')+'</td></tr>';
             document.getElementById('minioTable').innerHTML = mHtml;
         } catch(e) {}
@@ -613,18 +419,7 @@ const htmlPage = `
     async function restartService(n) { if(confirm('重启 '+n+' ?')) fetch(API_BASE+'service/restart?name='+n,{method:'POST'}).then(r=>r.text()).then(alert).then(runCheck); }
     async function fixMinio() { if(confirm("Public?")) fetch(API_BASE+'minio/fix',{method:'POST'}).then(r=>r.text()).then(alert).then(runCheck); }
     async function fixSsh() { if(confirm("Fix SSH?")) fetch(API_BASE+'fix_ssh',{method:'POST'}).then(r=>r.text()).then(alert); }
-    async function fmLoadPath(p) {
-        currentPath=p; document.getElementById('fmPath').innerText=p;
-        // 关键修复：使用 API_BASE 动态拼接
-        const r=await fetch(API_BASE+'fs/list?path='+encodeURIComponent(p)); const fs=await r.json();
-        let h=''; fs.sort((a,b)=>(a.is_dir===b.is_dir)?0:a.is_dir?-1:1);
-        fs.forEach(f=>{
-            let n=f.is_dir?'<a class="link-dir" href="javascript:fmLoadPath(\''+f.path+'\')">'+f.name+'</a>':f.name;
-            let act=f.is_dir?'':'<button class="btn-sm" onclick="fmDownload(\''+f.path+'\')">下载</button>';
-            h+='<tr><td>'+(f.is_dir?'📁':'📄')+' '+n+'</td><td>'+f.size+'</td><td>'+f.mod_time+'</td><td>'+act+'</td></tr>';
-        });
-        document.getElementById('fmBody').innerHTML=h;
-    }
+    async function fmLoadPath(p) { currentPath=p; document.getElementById('fmPath').innerText=p; const r=await fetch(API_BASE+'fs/list?path='+encodeURIComponent(p)); const fs=await r.json(); let h=''; fs.sort((a,b)=>(a.is_dir===b.is_dir)?0:a.is_dir?-1:1); fs.forEach(f=>{ let n=f.is_dir?'<a class="link-dir" href="javascript:fmLoadPath(\''+f.path+'\')">'+f.name+'</a>':f.name; let act=f.is_dir?'':'<button class="btn-sm" onclick="fmDownload(\''+f.path+'\')">下载</button>'; h+='<tr><td>'+(f.is_dir?'📁':'📄')+' '+n+'</td><td>'+f.size+'</td><td>'+f.mod_time+'</td><td>'+act+'</td></tr>'; }); document.getElementById('fmBody').innerHTML=h; }
     function fmUpDir() { let p=currentPath.split('/'); p.pop(); let n=p.join('/'); if(!n)n='/'; fmLoadPath(n); }
     function fmDownload(p) { window.location.href = API_BASE + 'fs/download?path=' + encodeURIComponent(p); }
     async function fmDoUpload() { const inp=document.getElementById('fmUploadInput'); const fd=new FormData(); fd.append("file", inp.files[0]); fd.append("path", currentPath); const st=document.getElementById('fmStatus'); st.innerText="Uploading..."; await fetch(API_BASE+'upload_any', {method:'POST', body:fd}); st.innerText="Done"; fmLoadPath(currentPath); }
@@ -640,94 +435,26 @@ const htmlPage = `
     const redis = {
        allKeys: [], currentFilter: 'all', initialized: false,
        init: function() { if(this.initialized) return; this.fetchInfo(); this.fetchAllKeys(); this.initialized = true; },
-       fetchInfo: async function() {
-          try {
-             // 关键修复：使用 API_BASE 动态拼接
-             const res = await fetch(API_BASE + 'baseservices/redis/info'); if (!res.ok) throw new Error('Failed to fetch info');
-             const info = await res.json();
-             const metrics = {'redis_version': 'Version', 'uptime_in_days': 'Uptime (Days)', 'connected_clients': 'Clients', 'used_memory_human': 'Memory', 'total_commands_processed': 'Commands', 'instantaneous_ops_per_sec': 'Ops/Sec'};
-             const grid = document.getElementById('redis-info-grid'); grid.innerHTML = '';
-             for (const key in metrics) {
-                if (info[key]) grid.innerHTML += '<div class="card"><h3>' + metrics[key] + '</h3><p style="font-size:1.5em;font-weight:bold;">' + info[key] + '</p></div>';
-             }
-          } catch (e) { document.getElementById('redis-info-grid').innerHTML = '<p class="fail">Failed to load Redis stats.</p>'; }
-       },
-       fetchAllKeys: async function() {
-          try {
-             // 关键修复：使用 API_BASE 动态拼接
-             const res = await fetch(API_BASE + 'baseservices/redis/keys'); if (!res.ok) throw new Error('Failed to fetch keys');
-             this.allKeys = await res.json() || []; this.allKeys.sort((a, b) => a.key.localeCompare(b.key));
-             this.renderTable();
-          } catch (e) { document.getElementById('redis-keys-table-container').innerHTML = '<p class="fail">Failed to load keys.</p>'; }
-       },
-       renderTable: function() {
-          let html = '<table><thead><tr><th>Key</th><th>Type</th><th>Actions</th></tr></thead><tbody>';
-          this.allKeys.forEach(item => {
-             html += '<tr><td title="' + escapeHtml(item.key) + '">' + escapeHtml(item.key) + '</td><td>' + escapeHtml(item.type) + '</td>' +
-                   '<td><button class="btn-sm" onclick="redis.viewEditKey(\'' + item.key + '\', \'' + item.type + '\')">View/Edit</button> ' +
-                   '<button class="btn-sm btn-red" onclick="redis.deleteKey(\'' + item.key + '\')">Delete</button></td></tr>';
-          });
-          html += '</tbody></table>';
-          document.getElementById('redis-keys-table-container').innerHTML = html;
-       },
-       deleteKey: async function(key) {
-          if (!confirm('确认删除: ' + key + '?')) return;
-          // 关键修复：使用 API_BASE 动态拼接
-          await fetch(API_BASE + 'baseservices/redis/key?key=' + encodeURIComponent(key), { method: 'DELETE' });
-          this.fetchAllKeys();
-       },
-       viewEditKey: async function(key, type) {
-          const modalTitle = document.getElementById('modal-title'); const modalBody = document.getElementById('modal-body');
-          modalTitle.textContent = 'Editing ' + type + ': ' + key; modalBody.innerHTML = '<p>Loading...</p>';
-          document.getElementById('modal-backdrop').style.display = 'block'; document.getElementById('modal').style.display = 'block';
-          // 关键修复：使用 API_BASE 动态拼接
-          const res = await fetch(API_BASE + 'baseservices/redis/value?type=' + type + '&key=' + encodeURIComponent(key));
-          const data = await res.json();
-          this.renderModalContent(data);
-       },
+       fetchInfo: async function() { try { const res = await fetch(API_BASE + 'baseservices/redis/info'); if (!res.ok) throw new Error('Failed to fetch info'); const info = await res.json(); const metrics = {'redis_version': 'Version', 'uptime_in_days': 'Uptime (Days)', 'connected_clients': 'Clients', 'used_memory_human': 'Memory', 'total_commands_processed': 'Commands', 'instantaneous_ops_per_sec': 'Ops/Sec'}; const grid = document.getElementById('redis-info-grid'); grid.innerHTML = ''; for (const key in metrics) { if (info[key]) grid.innerHTML += '<div class="card"><h3>' + metrics[key] + '</h3><p style="font-size:1.5em;font-weight:bold;">' + info[key] + '</p></div>'; } } catch (e) { document.getElementById('redis-info-grid').innerHTML = '<p class="fail">Failed to load Redis stats.</p>'; } },
+       fetchAllKeys: async function() { try { const res = await fetch(API_BASE + 'baseservices/redis/keys'); if (!res.ok) throw new Error('Failed to fetch keys'); this.allKeys = await res.json() || []; this.allKeys.sort((a, b) => a.key.localeCompare(b.key)); this.renderTable(); } catch (e) { document.getElementById('redis-keys-table-container').innerHTML = '<p class="fail">Failed to load keys.</p>'; } },
+       renderTable: function() { let html = '<table><thead><tr><th>Key</th><th>Type</th><th>Actions</th></tr></thead><tbody>'; this.allKeys.forEach(item => { html += '<tr><td title="' + escapeHtml(item.key) + '">' + escapeHtml(item.key) + '</td><td>' + escapeHtml(item.type) + '</td><td><button class="btn-sm" onclick="redis.viewEditKey(\'' + item.key + '\', \'' + item.type + '\')">View/Edit</button> <button class="btn-sm btn-red" onclick="redis.deleteKey(\'' + item.key + '\')">Delete</button></td></tr>'; }); html += '</tbody></table>'; document.getElementById('redis-keys-table-container').innerHTML = html; },
+       deleteKey: async function(key) { if (!confirm('确认删除: ' + key + '?')) return; await fetch(API_BASE + 'baseservices/redis/key?key=' + encodeURIComponent(key), { method: 'DELETE' }); this.fetchAllKeys(); },
+       viewEditKey: async function(key, type) { document.getElementById('modal-title').textContent = 'Editing ' + type + ': ' + key; document.getElementById('modal-body').innerHTML = '<p>Loading...</p>'; document.getElementById('modal-backdrop').style.display = 'block'; document.getElementById('modal').style.display = 'block'; const res = await fetch(API_BASE + 'baseservices/redis/value?type=' + type + '&key=' + encodeURIComponent(key)); const data = await res.json(); this.renderModalContent(data); },
        renderModalContent: function(data) {
           let body = '';
           switch (data.type) {
-             case 'string':
-                body = '<div class="form-group"><label for="stringValue">Value</label><textarea id="stringValue" rows="5" style="width:100%">' + escapeHtml(data.value) + '</textarea></div>' +
-                      '<button class="btn-green" onclick="redis.saveStringValue(\'' + data.key + '\')">Save</button>';
-                break;
-             case 'list':
-                let itemsHtml = data.value.map(item => '<div class="list-item"><span>' + escapeHtml(item) + '</span><button class="btn-sm btn-red" onclick="redis.deleteListItem(\'' + data.key + '\', \'' + escapeHtml(item) + '\')">Delete</button></div>').join('');
-                body = '<div class="form-group"><label>Add New Item (LPUSH)</label><input type="text" id="newListItem" placeholder="Enter value" style="width:100%"><button class="btn-green" style="margin-top:10px;" onclick="redis.addListItem(\'' + data.key + '\')">Add</button></div><hr>' + itemsHtml;
-                break;
-             case 'hash':
-                let fieldsHtml = Object.entries(data.value).map(([field, value]) => '<div class="hash-item"><span><strong>' + escapeHtml(field) + ':</strong> ' + escapeHtml(value) + '</span><button class="btn-sm btn-red" onclick="redis.deleteHashField(\'' + data.key + '\', \'' + escapeHtml(field) + '\')">Delete</button></div>').join('');
-                body = '<div class="form-group"><label>Add/Edit Field</label><input type="text" id="newHashField" placeholder="Field name" style="width:100%; margin-bottom:5px;"><textarea id="newHashValue" placeholder="Field value" style="width:100%"></textarea><button class="btn-green" style="margin-top:10px;" onclick="redis.addHashField(\'' + data.key + '\')">Save Field</button></div><hr>' + fieldsHtml;
-                break;
+             case 'string': body = '<div class="form-group"><label>Value</label><textarea id="stringValue" rows="5" style="width:100%">' + escapeHtml(data.value) + '</textarea></div><button class="btn-green" onclick="redis.saveStringValue(\'' + data.key + '\')">Save</button>'; break;
+             case 'list': let items = data.value.map(item => '<div class="list-item"><span>' + escapeHtml(item) + '</span><button class="btn-sm btn-red" onclick="redis.deleteListItem(\'' + data.key + '\', \'' + escapeHtml(item) + '\')">Delete</button></div>').join(''); body = '<div class="form-group"><input type="text" id="newListItem" placeholder="New Item" style="width:100%"><button class="btn-green" style="margin-top:10px;" onclick="redis.addListItem(\'' + data.key + '\')">Add</button></div><hr>' + items; break;
+             case 'hash': let fields = Object.entries(data.value).map(([f, v]) => '<div class="hash-item"><span><strong>' + escapeHtml(f) + ':</strong> ' + escapeHtml(v) + '</span><button class="btn-sm btn-red" onclick="redis.deleteHashField(\'' + data.key + '\', \'' + escapeHtml(f) + '\')">Delete</button></div>').join(''); body = '<div class="form-group"><input type="text" id="newHashField" placeholder="Field" style="width:100%"><textarea id="newHashValue" placeholder="Value" style="width:100%"></textarea><button class="btn-green" style="margin-top:10px;" onclick="redis.addHashField(\'' + data.key + '\')">Save</button></div><hr>' + fields; break;
              default: body = '<p>Unsupported type: ' + data.type + '</p>';
           }
           document.getElementById('modal-body').innerHTML = body;
        },
-       saveStringValue: async function(key) {
-          const value = document.getElementById('stringValue').value;
-          // 关键修复：使用 API_BASE 动态拼接
-          await fetch(API_BASE + 'baseservices/redis/value?type=string&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
-          this.hideModal();
-       },
-       addListItem: async function(key) {
-          const value = document.getElementById('newListItem').value; if (!value) return;
-          await fetch(API_BASE + 'baseservices/redis/value?type=list&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
-          this.viewEditKey(key, 'list');
-       },
-       deleteListItem: async function(key, value) {
-          await fetch(API_BASE + 'baseservices/redis/value?type=list&key=' + encodeURIComponent(key) + '&value=' + encodeURIComponent(value), { method: 'DELETE' });
-          this.viewEditKey(key, 'list');
-       },
-       addHashField: async function(key) {
-          const field = document.getElementById('newHashField').value; const value = document.getElementById('newHashValue').value; if (!field) return;
-          await fetch(API_BASE + 'baseservices/redis/value?type=hash&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field, value }) });
-          this.viewEditKey(key, 'hash');
-       },
-       deleteHashField: async function(key, field) {
-          await fetch(API_BASE + 'baseservices/redis/value?type=hash&key=' + encodeURIComponent(key) + '&field=' + encodeURIComponent(field), { method: 'DELETE' });
-          this.viewEditKey(key, 'hash');
-       },
+       saveStringValue: async function(key) { const value = document.getElementById('stringValue').value; await fetch(API_BASE + 'baseservices/redis/value?type=string&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) }); this.hideModal(); },
+       addListItem: async function(key) { const value = document.getElementById('newListItem').value; if (!value) return; await fetch(API_BASE + 'baseservices/redis/value?type=list&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) }); this.viewEditKey(key, 'list'); },
+       deleteListItem: async function(key, value) { await fetch(API_BASE + 'baseservices/redis/value?type=list&key=' + encodeURIComponent(key) + '&value=' + encodeURIComponent(value), { method: 'DELETE' }); this.viewEditKey(key, 'list'); },
+       addHashField: async function(key) { const field = document.getElementById('newHashField').value; const value = document.getElementById('newHashValue').value; if (!field) return; await fetch(API_BASE + 'baseservices/redis/value?type=hash&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field, value }) }); this.viewEditKey(key, 'hash'); },
+       deleteHashField: async function(key, field) { await fetch(API_BASE + 'baseservices/redis/value?type=hash&key=' + encodeURIComponent(key) + '&field=' + encodeURIComponent(field), { method: 'DELETE' }); this.viewEditKey(key, 'hash'); },
        hideModal: function() { document.getElementById('modal-backdrop').style.display = 'none'; document.getElementById('modal').style.display = 'none'; }
     };
     document.getElementById('modal-close-btn').addEventListener('click', () => redis.hideModal());
@@ -742,92 +469,15 @@ const htmlPage = `
           this.charts.size = new Chart(document.getElementById('mysql-tableSizeChart').getContext('2d'), { type: 'bar', data: { labels: [], datasets: [{ label: 'Size MB', data: [], backgroundColor: 'rgba(52, 152, 219, 0.6)' }] }, options: { responsive: true, indexAxis: 'y' } });
           this.charts.ops = new Chart(document.getElementById('mysql-tableOpsChart').getContext('2d'), { type: 'bar', data: { labels: [], datasets: [{ label: 'Ops', data: [], backgroundColor: 'rgba(231, 76, 60, 0.6)' }] }, options: { responsive: true, indexAxis: 'y' } });
           this.charts.repl = new Chart(document.getElementById('mysql-replChart').getContext('2d'), { type: 'line', data: { labels: [], datasets: [{ label: 'Delay(s)', data: [], borderColor: '#c0392b', fill: false }] }, options: { responsive: true, animation: false } });
-          this.loadAll();
-          setInterval(() => this.loadAll(), 10000);
-          this.initialized = true;
+          this.loadAll(); setInterval(() => this.loadAll(), 10000); this.initialized = true;
        },
        switchDB: function(db) { this.currentDB = db; this.loadAll(); },
-       loadAll: async function() {
-          await Promise.all([ this.loadMetrics(), this.loadTables(), this.loadProcesslist(), this.loadRepl() ]);
-       },
-       loadMetrics: async function() {
-          try {
-             // 关键修复：使用 API_BASE 动态拼接
-             const res = await fetch(API_BASE + 'baseservices/mysql/metrics/' + this.currentDB); const arr = await res.json(); if (!arr || arr.length === 0) return;
-             const m = arr[0];
-             document.getElementById('mysql-threads').innerText = m.threads; document.getElementById('mysql-qps').innerText = m.qps;
-             document.getElementById('mysql-connections').innerText = m.max_connections; document.getElementById('mysql-uptime').innerText = m.uptime_str;
-             const now = new Date().toLocaleTimeString();
-             if (this.charts.metric.data.labels.length > 20) { this.charts.metric.data.labels.shift(); this.charts.metric.data.datasets.forEach(ds => ds.data.shift()); }
-             this.charts.metric.data.labels.push(now); this.charts.metric.data.datasets[0].data.push(m.threads); this.charts.metric.data.datasets[1].data.push(m.qps);
-             this.charts.metric.update();
-          } catch (e) { console.error('mysql.loadMetrics', e); }
-       },
-       loadTables: async function() {
-          try {
-             // 关键修复：使用 API_BASE 动态拼接
-             const res = await fetch(API_BASE + 'baseservices/mysql/tables/' + this.currentDB); const data = await res.json(); if (!Array.isArray(data)) return;
-             this.charts.size.data.labels = data.map(d => d.name); this.charts.size.data.datasets[0].data = data.map(d => d.size_mb); this.charts.size.update();
-             this.charts.ops.data.labels = data.map(d => d.name); this.charts.ops.data.datasets[0].data = data.map(d => d.ops); this.charts.ops.update();
-          } catch (e) { console.error('mysql.loadTables', e); }
-       },
-       loadProcesslist: async function() {
-          try {
-             // 关键修复：使用 API_BASE 动态拼接
-             const res = await fetch(API_BASE + 'baseservices/mysql/processlist/' + this.currentDB); const data = await res.json();
-             const filter = document.getElementById('mysql-slowFilter').value.toLowerCase();
-             const tbody = document.querySelector('#mysql-slowQueryTable tbody'); tbody.innerHTML = '';
-             (data || []).forEach(q => {
-                if (filter && (!q.info || !q.info.toLowerCase().includes(filter))) return;
-                tbody.innerHTML += '<tr><td>' + q.id + '</td><td>' + q.user + '</td><td>' + q.host + '</td><td>' + q.db + '</td><td>' + q.command + '</td><td>' + q.time + '</td><td>' + q.state + '</td><td>' + escapeHtml(q.info) + '</td></tr>';
-             });
-          } catch (e) { console.error('mysql.loadProcesslist', e); }
-       },
-       loadRepl: async function() {
-          try {
-             // 关键修复：使用 API_BASE 动态拼接
-             const res = await fetch(API_BASE + 'baseservices/mysql/replstatus/' + this.currentDB); const r = await res.json();
-             document.getElementById('mysql-replStatus').innerHTML = 'Role: ' + r.role + ' | Slave Running: <span class="' + (r.slave_running ? 'pass' : 'fail') + '">' + r.slave_running + '</span> | Delay(s): ' + r.seconds_behind;
-             if (this.charts.repl.data.labels.length > 20) { this.charts.repl.data.labels.shift(); this.charts.repl.data.datasets[0].data.shift(); }
-             this.charts.repl.data.labels.push(new Date().toLocaleTimeString()); this.charts.repl.data.datasets[0].data.push(r.seconds_behind || 0);
-             this.charts.repl.update();
-          } catch (e) { console.error('mysql.loadRepl', e); }
-       },
-       execSQL: async function() {
-          const sql = document.getElementById('mysql-sqlInput').value.trim(); if (!sql) return;
-          // 关键修复：使用 API_BASE 动态拼接，且处理 JSON 结果生成表格
-          const res = await fetch(API_BASE + 'baseservices/mysql/execsql/' + this.currentDB, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
-          const result = await res.json();
-          const div = document.getElementById('mysql-sqlResult');
-          
-          if(result.error) {
-              div.innerHTML = '<div style="color:red; padding:10px;">Error: ' + escapeHtml(result.error) + '</div>';
-              return;
-          }
-          
-          if(!result.columns || result.columns.length === 0) {
-              div.innerHTML = '<div style="padding:10px; color:#666;">Query executed successfully. No rows returned.</div>';
-              return;
-          }
-
-          let tableHtml = '<table class="sql-table"><thead><tr>';
-          result.columns.forEach(col => {
-              tableHtml += '<th>' + escapeHtml(col) + '</th>';
-          });
-          tableHtml += '</tr></thead><tbody>';
-          
-          if(result.rows) {
-              result.rows.forEach(row => {
-                 tableHtml += '<tr>';
-                 row.forEach(cell => {
-                     tableHtml += '<td>' + escapeHtml(cell) + '</td>';
-                 });
-                 tableHtml += '</tr>';
-              });
-          }
-          tableHtml += '</tbody></table>';
-          div.innerHTML = tableHtml;
-       }
+       loadAll: async function() { await Promise.all([ this.loadMetrics(), this.loadTables(), this.loadProcesslist(), this.loadRepl() ]); },
+       loadMetrics: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/metrics/' + this.currentDB); const arr = await res.json(); if (!arr || arr.length === 0) return; const m = arr[0]; document.getElementById('mysql-threads').innerText = m.threads; document.getElementById('mysql-qps').innerText = m.qps; document.getElementById('mysql-connections').innerText = m.max_connections; document.getElementById('mysql-uptime').innerText = m.uptime_str; const now = new Date().toLocaleTimeString(); if (this.charts.metric.data.labels.length > 20) { this.charts.metric.data.labels.shift(); this.charts.metric.data.datasets.forEach(ds => ds.data.shift()); } this.charts.metric.data.labels.push(now); this.charts.metric.data.datasets[0].data.push(m.threads); this.charts.metric.data.datasets[1].data.push(m.qps); this.charts.metric.update(); } catch (e) { console.error('mysql.loadMetrics', e); } },
+       loadTables: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/tables/' + this.currentDB); const data = await res.json(); if (!Array.isArray(data)) return; this.charts.size.data.labels = data.map(d => d.name); this.charts.size.data.datasets[0].data = data.map(d => d.size_mb); this.charts.size.update(); this.charts.ops.data.labels = data.map(d => d.name); this.charts.ops.data.datasets[0].data = data.map(d => d.ops); this.charts.ops.update(); } catch (e) { console.error('mysql.loadTables', e); } },
+       loadProcesslist: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/processlist/' + this.currentDB); const data = await res.json(); const filter = document.getElementById('mysql-slowFilter').value.toLowerCase(); const tbody = document.querySelector('#mysql-slowQueryTable tbody'); tbody.innerHTML = ''; (data || []).forEach(q => { if (filter && (!q.info || !q.info.toLowerCase().includes(filter))) return; tbody.innerHTML += '<tr><td>' + q.id + '</td><td>' + q.user + '</td><td>' + q.host + '</td><td>' + q.db + '</td><td>' + q.command + '</td><td>' + q.time + '</td><td>' + q.state + '</td><td>' + escapeHtml(q.info) + '</td></tr>'; }); } catch (e) { console.error('mysql.loadProcesslist', e); } },
+       loadRepl: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/replstatus/' + this.currentDB); const r = await res.json(); document.getElementById('mysql-replStatus').innerHTML = 'Role: ' + r.role + ' | Slave Running: <span class="' + (r.slave_running ? 'pass' : 'fail') + '">' + r.slave_running + '</span> | Delay(s): ' + r.seconds_behind; if (this.charts.repl.data.labels.length > 20) { this.charts.repl.data.labels.shift(); this.charts.repl.data.datasets[0].data.shift(); } this.charts.repl.data.labels.push(new Date().toLocaleTimeString()); this.charts.repl.data.datasets[0].data.push(r.seconds_behind || 0); this.charts.repl.update(); } catch (e) { console.error('mysql.loadRepl', e); } },
+       execSQL: async function() { const sql = document.getElementById('mysql-sqlInput').value.trim(); if (!sql) return; const res = await fetch(API_BASE + 'baseservices/mysql/execsql/' + this.currentDB, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) }); const result = await res.json(); const div = document.getElementById('mysql-sqlResult'); if(result.error) { div.innerHTML = '<div style="color:red; padding:10px;">Error: ' + escapeHtml(result.error) + '</div>'; return; } if(!result.columns || result.columns.length === 0) { div.innerHTML = '<div style="padding:10px; color:#666;">Query executed successfully. No rows returned.</div>'; return; } let tableHtml = '<table class="sql-table"><thead><tr>'; result.columns.forEach(col => { tableHtml += '<th>' + escapeHtml(col) + '</th>'; }); tableHtml += '</tr></thead><tbody>'; if(result.rows) { result.rows.forEach(row => { tableHtml += '<tr>'; row.forEach(cell => { tableHtml += '<td>' + escapeHtml(cell) + '</td>'; }); tableHtml += '</tr>'; }); } tableHtml += '</tbody></table>'; div.innerHTML = tableHtml; }
     };
 </script>
 </body>
@@ -855,9 +505,8 @@ type SysInfo struct {
 	DiskDetail string     `json:"disk_detail"`
 	Ulimit     string     `json:"ulimit"`
 	UlimitPass bool       `json:"ulimit_pass"`
-	// 新增监控字段
-	MemUsage float64 `json:"mem_usage"`
-	LoadAvg  float64 `json:"load_avg"`
+	MemUsage   float64    `json:"mem_usage"`
+	LoadAvg    float64    `json:"load_avg"`
 }
 type SecInfo struct {
 	SELinux     string `json:"selinux"`
@@ -901,16 +550,10 @@ func main() {
 	flag.Parse()
 	os.MkdirAll(RpmCacheDir, 0755)
 	autoFixSshConfig()
-
-	// 初始化日志路径
 	initLogPaths()
-
-	// Init Base Services
 	loadConfig()
 	initRedis()
 	initMySQL()
-
-	// Original Agent Handlers
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(htmlPage))
@@ -932,30 +575,21 @@ func main() {
 	http.HandleFunc("/ws/deploy", handleDeployWS)
 	http.HandleFunc("/ws/terminal", handleSysTermWS)
 	http.HandleFunc("/ws/log", handleLogWS)
-
-	// --- BaseServices Handlers ---
 	bsAPI := "/api/baseservices"
-	// Redis
 	http.HandleFunc(bsAPI+"/redis/keys", redisKeysAndTypesHandler)
 	http.HandleFunc(bsAPI+"/redis/info", redisInfoHandler)
 	http.HandleFunc(bsAPI+"/redis/key", redisKeyHandler)
 	http.HandleFunc(bsAPI+"/redis/value", redisValueHandler)
-	// MySQL
 	http.HandleFunc(bsAPI+"/mysql/metrics/", apiMetrics)
 	http.HandleFunc(bsAPI+"/mysql/tables/", apiTables)
 	http.HandleFunc(bsAPI+"/mysql/processlist/", apiProcesslist)
 	http.HandleFunc(bsAPI+"/mysql/replstatus/", apiRepl)
 	http.HandleFunc(bsAPI+"/mysql/execsql/", executeSQL)
-	// Proxies
 	setupProxies(bsAPI)
-
 	fmt.Printf("Agent running on %s\n", ServerPort)
 	http.ListenAndServe("0.0.0.0:"+ServerPort, nil)
 }
-
-// 动态检测日志路径
 func initLogPaths() {
-	// Helper to check file existence
 	resolveLog := func(primary, fallback string) string {
 		if _, err := os.Stat(primary); err == nil {
 			return primary
@@ -963,52 +597,49 @@ func initLogPaths() {
 		if _, err := os.Stat(fallback); err == nil {
 			return fallback
 		}
-		return primary // Default to primary even if missing
+		return primary
 	}
-
 	logFileMap["nginx_access"] = resolveLog("/var/log/nginx/access.log", "/usr/local/nginx/logs/access.log")
 	logFileMap["nginx_error"] = resolveLog("/var/log/nginx/error.log", "/usr/local/nginx/logs/error.log")
 }
-
-// --- BaseServices Core Logic ---
 func loadConfig() {
 	prodPath := "/opt/emm/current/config/global.properties"
 	localPath := "global.properties"
 	var p *properties.Properties
 	var err error
 	if _, err = os.Stat(prodPath); err == nil {
-		log.Printf("Loading configuration from production path: %s", prodPath)
+		log.Printf("Loading config: %s", prodPath)
 		p, err = properties.LoadFile(prodPath, properties.UTF8)
 	} else {
-		log.Printf("Production config not found. Loading from local path: %s", localPath)
+		log.Printf("Loading local config: %s", localPath)
 		p, err = properties.LoadFile(localPath, properties.UTF8)
 	}
 	if err != nil {
-		log.Printf("Warning: Unable to load configuration file: %v", err)
+		log.Printf("Warning: Config error: %v", err)
 		return
 	}
 	if err := p.Decode(&appConfig); err != nil {
-		log.Printf("Warning: Error decoding configuration: %v", err)
+		log.Printf("Warning: Decode error: %v", err)
 	}
 }
 func initRedis() {
 	if appConfig.RedisHost == "" {
-		log.Println("Redis not configured, skipping init.")
+		log.Println("Redis skipped.")
 		return
 	}
 	addr := fmt.Sprintf("%s:%d", appConfig.RedisHost, appConfig.RedisPort)
 	rdb = redis.NewClient(&redis.Options{Addr: addr, Password: appConfig.RedisPassword, DB: 0})
 	if _, err := rdb.Ping(ctx).Result(); err != nil {
-		log.Printf("Warning: Could not connect to Redis at %s: %v", addr, err)
+		log.Printf("Redis connect fail: %v", err)
 		rdb = nil
 	} else {
-		log.Println("Successfully connected to Redis.")
+		log.Println("Redis connected.")
 	}
 }
 func initMySQL() {
 	dbConnections = make(map[string]*sql.DB)
 	if appConfig.MdmJdbcURL == "" {
-		log.Println("MySQL not configured, skipping init.")
+		log.Println("MySQL skipped.")
 		return
 	}
 	configs := map[string]map[string]string{
@@ -1026,56 +657,40 @@ func initMySQL() {
 			}
 		}
 		if dsn == "" {
-			log.Printf("Warning: Could not parse DSN for database '%s'. Skipping.", dbName)
 			continue
 		}
 		db, err := sql.Open("mysql", dsn)
 		if err != nil {
-			log.Printf("Warning: Could not open connection for database '%s': %v. Skipping.", dbName, err)
+			log.Printf("MySQL %s open error: %v", dbName, err)
 			continue
 		}
 		db.SetConnMaxLifetime(time.Minute * 3)
 		db.SetMaxOpenConns(10)
 		db.SetMaxIdleConns(5)
 		if err = db.Ping(); err != nil {
-			log.Printf("Warning: Could not connect to MySQL database '%s': %v. Skipping.", dbName, err)
+			log.Printf("MySQL %s ping error: %v", dbName, err)
 			continue
 		}
 		dbConnections[dbName] = db
-		log.Printf("Successfully connected to MySQL database: %s", dbName)
+		log.Printf("MySQL %s connected", dbName)
 	}
 }
 func setupProxies(basePath string) {
-	// 简单的加载中页面
 	redirectHTML := `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Loading...</title><style>body{margin:0;display:flex;justify-content:center;align-items:center;height:100vh;background:#f5f7fa;color:#666;font-family:sans-serif;}</style><script>window.location.replace(window.location.pathname + "/");</script></head><body><div style="text-align:center">Loading Interface...</div></body></html>`
-
-	// ==========================================
-	//  核心修复：HTML 路径重写器 (解决 Nginx 反代白屏)
-	// ==========================================
 	rewriteHTML := func(r *http.Response) error {
-		// 1. 删除安全头，允许 iframe 嵌入
 		r.Header.Del("X-Frame-Options")
 		r.Header.Del("Content-Security-Policy")
-
-		// 2. 检查是否为 HTML 内容
 		contentType := r.Header.Get("Content-Type")
 		if strings.Contains(contentType, "text/html") {
-			// 读取响应体
 			bodyBytes, err := ioutil.ReadAll(r.Body)
 			if err != nil {
 				return err
 			}
 			r.Body.Close()
-
-			// 替换绝对路径为相对路径 (src="/ -> src=")
-			// 这会让浏览器基于当前 iframe 的 URL (如 /gogogo/api/baseservices/minio/) 去请求资源
-			// 从而正确经过 Nginx -> Agent -> MinIO 的代理链路
 			bodyString := string(bodyBytes)
 			bodyString = strings.ReplaceAll(bodyString, `src="/`, `src="`)
 			bodyString = strings.ReplaceAll(bodyString, `href="/`, `href="`)
 			bodyString = strings.ReplaceAll(bodyString, `action="/`, `action="`)
-
-			// 重写响应体
 			buf := bytes.NewBufferString(bodyString)
 			r.Body = ioutil.NopCloser(buf)
 			r.ContentLength = int64(buf.Len())
@@ -1083,79 +698,54 @@ func setupProxies(basePath string) {
 		}
 		return nil
 	}
-
-	// RabbitMQ Proxy
 	if appConfig.RabbitMQAdminPort > 0 {
 		rabbitURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", appConfig.RabbitMQAdminPort))
 		rabbitProxy := httputil.NewSingleHostReverseProxy(rabbitURL)
-		rabbitProxy.ModifyResponse = rewriteHTML // 应用重写器
-
-		// 移除 Accept-Encoding 防止后端 gzip 压缩导致我们无法修改 HTML
+		rabbitProxy.ModifyResponse = rewriteHTML
 		rabbitProxy.Director = func(req *http.Request) {
 			req.URL.Scheme = rabbitURL.Scheme
 			req.URL.Host = rabbitURL.Host
 			req.Header.Del("Accept-Encoding")
 		}
-
 		http.Handle(basePath+"/rabbitmq/", http.StripPrefix(basePath+"/rabbitmq", rabbitProxy))
-		http.HandleFunc(basePath+"/rabbitmq", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(redirectHTML))
-		})
-		log.Printf("Enabled RabbitMQ proxy")
+		http.HandleFunc(basePath+"/rabbitmq", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(redirectHTML)) })
 	}
-
-	// MinIO Proxy (Console Port 9001)
 	targetMinio := "http://127.0.0.1:9001"
 	if appConfig.MinioURL != "" && !strings.Contains(appConfig.MinioURL, ":9000") {
 		targetMinio = appConfig.MinioURL
 	}
-
 	minioURL, err := url.Parse(targetMinio)
 	if err == nil {
 		minioProxy := httputil.NewSingleHostReverseProxy(minioURL)
-		minioProxy.ModifyResponse = rewriteHTML // 应用重写器
-
+		minioProxy.ModifyResponse = rewriteHTML
 		minioProxy.Director = func(req *http.Request) {
 			req.URL.Scheme = minioURL.Scheme
 			req.URL.Host = minioURL.Host
 			req.Header.Del("Accept-Encoding")
 		}
-
-		// 1. MinIO 基础代理入口
 		http.Handle(basePath+"/minio/", http.StripPrefix(basePath+"/minio", minioProxy))
-
-		// 2. MinIO Console 资源劫持
-		// 即使我们重写了 HTML，某些 JS 动态请求可能还是绝对路径，或者我们需要处理登录等 API
 		minioAssets := []string{"/static/", "/login", "/api/v1/", "/ws/", "/images/", "/styles/", "/loader.css"}
 		for _, path := range minioAssets {
 			http.Handle(path, minioProxy)
 		}
-
-		http.HandleFunc(basePath+"/minio", func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte(redirectHTML))
-		})
-		log.Printf("Enabled MinIO proxy to %s", targetMinio)
+		http.HandleFunc(basePath+"/minio", func(w http.ResponseWriter, r *http.Request) { w.Write([]byte(redirectHTML)) })
 	}
 }
-
-// --- BaseServices API Handlers ---
 func redisKeysAndTypesHandler(w http.ResponseWriter, r *http.Request) {
 	if rdb == nil {
-		http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
+		http.Error(w, "Redis not connected", 503)
 		return
 	}
 	var cursor uint64
 	var allKeys []string
-	reqCtx := r.Context()
 	for {
-		var keys []string
-		var err error
-		keys, cursor, err = rdb.Scan(reqCtx, cursor, "*", 500).Result()
+		keys, c, err := rdb.Scan(r.Context(), cursor, "*", 500).Result()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), 500)
 			return
 		}
 		allKeys = append(allKeys, keys...)
+		cursor = c
 		if cursor == 0 {
 			break
 		}
@@ -1168,133 +758,92 @@ func redisKeysAndTypesHandler(w http.ResponseWriter, r *http.Request) {
 	pipe := rdb.Pipeline()
 	keyTypes := make([]*redis.StatusCmd, len(allKeys))
 	for i, key := range allKeys {
-		keyTypes[i] = pipe.Type(reqCtx, key)
+		keyTypes[i] = pipe.Type(r.Context(), key)
 	}
-	_, err := pipe.Exec(reqCtx)
-	if err != nil && err != redis.Nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	pipe.Exec(r.Context())
 	result := make([]map[string]string, len(allKeys))
 	for i, key := range allKeys {
-		result[i] = map[string]string{
-			"key":  key,
-			"type": keyTypes[i].Val(),
-		}
+		result[i] = map[string]string{"key": key, "type": keyTypes[i].Val()}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
 func redisValueHandler(w http.ResponseWriter, r *http.Request) {
 	if rdb == nil {
-		http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
+		http.Error(w, "Redis not connected", 503)
 		return
 	}
 	key := r.URL.Query().Get("key")
 	dataType := r.URL.Query().Get("type")
 	if key == "" || dataType == "" {
-		http.Error(w, "Missing 'key' or 'type' query parameter", http.StatusBadRequest)
+		http.Error(w, "Missing params", 400)
 		return
 	}
-	reqCtx := r.Context()
 	switch r.Method {
 	case "GET":
-		var value interface{}
+		var val interface{}
 		var err error
 		switch dataType {
 		case "string":
-			value, err = rdb.Get(reqCtx, key).Result()
+			val, err = rdb.Get(r.Context(), key).Result()
 		case "list":
-			value, err = rdb.LRange(reqCtx, key, 0, -1).Result()
+			val, err = rdb.LRange(r.Context(), key, 0, -1).Result()
 		case "hash":
-			value, err = rdb.HGetAll(reqCtx, key).Result()
+			val, err = rdb.HGetAll(r.Context(), key).Result()
 		default:
-			http.Error(w, "Unsupported data type for GET", http.StatusBadRequest)
+			http.Error(w, "Unsupported type", 400)
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, err.Error(), 500)
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"key": key, "type": dataType, "value": value})
+		json.NewEncoder(w).Encode(map[string]interface{}{"key": key, "type": dataType, "value": val})
 	case "POST":
-		var payload map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			http.Error(w, "Invalid JSON", http.StatusBadRequest)
-			return
-		}
-		var err error
+		var p map[string]string
+		json.NewDecoder(r.Body).Decode(&p)
 		switch dataType {
 		case "string":
-			err = rdb.Set(reqCtx, key, payload["value"], 0).Err()
+			rdb.Set(r.Context(), key, p["value"], 0)
 		case "list":
-			err = rdb.LPush(reqCtx, key, payload["value"]).Err()
+			rdb.LPush(r.Context(), key, p["value"])
 		case "hash":
-			err = rdb.HSet(reqCtx, key, payload["field"], payload["value"]).Err()
+			rdb.HSet(r.Context(), key, p["field"], p["value"])
 		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusCreated)
+		w.WriteHeader(201)
 	case "DELETE":
-		var err error
 		switch dataType {
 		case "list":
-			val := r.URL.Query().Get("value")
-			err = rdb.LRem(reqCtx, key, 1, val).Err()
+			rdb.LRem(r.Context(), key, 1, r.URL.Query().Get("value"))
 		case "hash":
-			field := r.URL.Query().Get("field")
-			err = rdb.HDel(reqCtx, key, field).Err()
+			rdb.HDel(r.Context(), key, r.URL.Query().Get("field"))
 		}
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(200)
 	}
 }
 func redisKeyHandler(w http.ResponseWriter, r *http.Request) {
 	if rdb == nil {
-		http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
+		http.Error(w, "Redis not connected", 503)
 		return
 	}
-	if r.Method != "DELETE" {
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		return
+	if r.Method == "DELETE" {
+		rdb.Del(r.Context(), r.URL.Query().Get("key"))
+		w.WriteHeader(200)
 	}
-	key := r.URL.Query().Get("key")
-	if key == "" {
-		http.Error(w, "Missing 'key' query parameter", http.StatusBadRequest)
-		return
-	}
-	if err := rdb.Del(r.Context(), key).Err(); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.WriteHeader(http.StatusOK)
 }
 func redisInfoHandler(w http.ResponseWriter, r *http.Request) {
 	if rdb == nil {
-		http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
+		http.Error(w, "Redis not connected", 503)
 		return
 	}
-	info, err := rdb.Info(r.Context(), "all").Result()
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
+	info, _ := rdb.Info(r.Context(), "all").Result()
 	lines := strings.Split(info, "\r\n")
 	metrics := make(map[string]string)
 	for _, line := range lines {
 		if strings.Contains(line, ":") {
-			parts := strings.SplitN(line, ":", 2)
-			key := parts[0]
-			switch key {
-			case "redis_version", "uptime_in_days", "connected_clients", "used_memory_human", "total_commands_processed", "instantaneous_ops_per_sec":
-				metrics[key] = parts[1]
-			}
+			p := strings.SplitN(line, ":", 2)
+			metrics[p[0]] = p[1]
 		}
 	}
 	w.Header().Set("Content-Type", "application/json")
@@ -1304,7 +853,7 @@ func getDB(w http.ResponseWriter, r *http.Request, prefix string) (*sql.DB, bool
 	dbName := strings.TrimPrefix(r.URL.Path, prefix)
 	db, ok := dbConnections[dbName]
 	if !ok || db == nil {
-		http.Error(w, fmt.Sprintf("Database '%s' not connected or configured", dbName), http.StatusServiceUnavailable)
+		http.Error(w, "DB not found", 503)
 		return nil, false
 	}
 	return db, true
@@ -1314,71 +863,52 @@ func apiMetrics(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var key string
-	var threads, maxConnections, openTables, slowQueries int
-	var questions int64
-	var uptime int64
-	var innodbBuffTotal, innodbBuffUsed int
-
-	// Scan returns error if variable not found, ignore errors for robustness
-	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Threads_connected'").Scan(&key, &threads)
-	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Questions'").Scan(&key, &questions)
-	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Uptime'").Scan(&key, &uptime)
-	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Opened_tables'").Scan(&key, &openTables)
-	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Slow_queries'").Scan(&key, &slowQueries)
-	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'").Scan(&key, &innodbBuffTotal)
-	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data'").Scan(&key, &innodbBuffUsed)
-	_ = db.QueryRow("SHOW VARIABLES LIKE 'max_connections'").Scan(&key, &maxConnections)
-
+	var k string
+	var th, maxC, openT, slowQ int
+	var q int64
+	var up int64
+	var bufT, bufU int
+	db.QueryRow("SHOW GLOBAL STATUS LIKE 'Threads_connected'").Scan(&k, &th)
+	db.QueryRow("SHOW GLOBAL STATUS LIKE 'Questions'").Scan(&k, &q)
+	db.QueryRow("SHOW GLOBAL STATUS LIKE 'Uptime'").Scan(&k, &up)
+	db.QueryRow("SHOW GLOBAL STATUS LIKE 'Opened_tables'").Scan(&k, &openT)
+	db.QueryRow("SHOW GLOBAL STATUS LIKE 'Slow_queries'").Scan(&k, &slowQ)
+	db.QueryRow("SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'").Scan(&k, &bufT)
+	db.QueryRow("SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data'").Scan(&k, &bufU)
+	db.QueryRow("SHOW VARIABLES LIKE 'max_connections'").Scan(&k, &maxC)
 	now := time.Now()
 	qps := 0
-
-	// 加锁防止并发导致计算错误
 	qpsMutex.Lock()
 	if !lastQTime.IsZero() {
 		elapsed := now.Sub(lastQTime).Seconds()
-		if elapsed >= 1 && questions >= lastQuestions {
-			qps = int(float64(questions-lastQuestions) / elapsed)
+		if elapsed >= 1 && q >= lastQuestions {
+			qps = int(float64(q-lastQuestions) / elapsed)
 		}
 	}
-	lastQuestions = questions
+	lastQuestions = q
 	lastQTime = now
 	qpsMutex.Unlock()
-
-	days := uptime / 86400
-	hours := (uptime % 86400) / 3600
-	minutes := (uptime % 3600) / 60
-	seconds := uptime % 60
-	uptimeStr := fmt.Sprintf("%dd %dh %dm %ds", days, hours, minutes, seconds)
+	uptimeStr := fmt.Sprintf("%dd %dh %dm %ds", up/86400, (up%86400)/3600, (up%3600)/60, up%60)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode([]Metric{{
-		Time: now.Unix(), Uptime: uptime, UptimeStr: uptimeStr,
-		Threads: threads, QPS: qps, MaxConnections: maxConnections,
-		SlowQueries: slowQueries, OpenTables: openTables,
-		InnoDBBuffUsed: innodbBuffUsed, InnoDBBuffTotal: innodbBuffTotal,
-	}})
+	json.NewEncoder(w).Encode([]Metric{{Time: now.Unix(), Uptime: up, UptimeStr: uptimeStr, Threads: th, QPS: qps, MaxConnections: maxC, SlowQueries: slowQ, OpenTables: openT, InnoDBBuffUsed: bufU, InnoDBBuffTotal: bufT}})
 }
 func apiTables(w http.ResponseWriter, r *http.Request) {
 	db, ok := getDB(w, r, "/api/baseservices/mysql/tables/")
 	if !ok {
 		return
 	}
-	const q = `SELECT t.table_name, IFNULL(t.table_rows,0), ROUND(IFNULL(t.data_length,0)/1024/1024), IFNULL(io.count_read,0) + IFNULL(io.count_write,0) FROM information_schema.tables t LEFT JOIN performance_schema.table_io_waits_summary_by_table io ON io.object_schema = t.table_schema AND io.object_name = t.table_name WHERE t.table_schema = DATABASE() ORDER BY 3 DESC LIMIT 10;`
-	rows, err := db.Query(q)
+	rows, err := db.Query(`SELECT t.table_name, IFNULL(t.table_rows,0), ROUND(IFNULL(t.data_length,0)/1024/1024), IFNULL(io.count_read,0) + IFNULL(io.count_write,0) FROM information_schema.tables t LEFT JOIN performance_schema.table_io_waits_summary_by_table io ON io.object_schema = t.table_schema AND io.object_name = t.table_name WHERE t.table_schema = DATABASE() ORDER BY 3 DESC LIMIT 10;`)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), 500)
 		return
 	}
 	defer rows.Close()
 	var out []TableStat
 	for rows.Next() {
 		var ts TableStat
-		if err := rows.Scan(&ts.Name, &ts.Rows, &ts.SizeMB, &ts.Ops); err != nil {
-			// 如果 performance_schema 没有开启或权限不足，这里可能扫描失败
-			// 简单忽略继续
-			continue
+		if err := rows.Scan(&ts.Name, &ts.Rows, &ts.SizeMB, &ts.Ops); err == nil {
+			out = append(out, ts)
 		}
-		out = append(out, ts)
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
@@ -1390,19 +920,18 @@ func apiProcesslist(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := db.Query("SHOW FULL PROCESSLIST")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, err.Error(), 500)
 		return
 	}
 	defer rows.Close()
 	var out []ProcessListRow
 	for rows.Next() {
-		var id, timeSec int
-		var user, host, command, state string
-		var dbName, info sql.NullString
-		if err := rows.Scan(&id, &user, &host, &dbName, &command, &timeSec, &state, &info); err != nil {
-			continue
+		var id, t int
+		var u, h, c, s string
+		var d, i sql.NullString
+		if err := rows.Scan(&id, &u, &h, &d, &c, &t, &s, &i); err == nil {
+			out = append(out, ProcessListRow{Id: id, User: u, Host: h, DB: d.String, Command: c, Time: t, State: s, Info: i.String})
 		}
-		out = append(out, ProcessListRow{Id: id, User: user, Host: host, DB: dbName.String, Command: command, Time: timeSec, State: state, Info: info.String})
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(out)
@@ -1414,7 +943,6 @@ func apiRepl(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := db.Query("SHOW SLAVE STATUS")
 	if err != nil {
-		// 如果不是 slave，可能会报错或者空
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(ReplicationStatus{Role: "master"})
 		return
@@ -1426,24 +954,20 @@ func apiRepl(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cols, _ := rows.Columns()
-	values := make([]sql.NullString, len(cols))
-	scanPtrs := make([]interface{}, len(cols))
-	for i := range values {
-		scanPtrs[i] = &values[i]
+	vals := make([]sql.NullString, len(cols))
+	ptrs := make([]interface{}, len(cols))
+	for i := range vals {
+		ptrs[i] = &vals[i]
 	}
-	rows.Scan(scanPtrs...)
+	rows.Scan(ptrs...)
 	m := map[string]string{}
 	for i, col := range cols {
-		m[col] = values[i].String
+		m[col] = vals[i].String
 	}
-	secBehind := 0
-	fmt.Sscanf(m["Seconds_Behind_Master"], "%d", &secBehind)
+	sb := 0
+	fmt.Sscanf(m["Seconds_Behind_Master"], "%d", &sb)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ReplicationStatus{
-		Role:          "slave",
-		SlaveRunning:  (m["Slave_IO_Running"] == "Yes" && m["Slave_SQL_Running"] == "Yes"),
-		SecondsBehind: secBehind,
-	})
+	json.NewEncoder(w).Encode(ReplicationStatus{Role: "slave", SlaveRunning: (m["Slave_IO_Running"] == "Yes" && m["Slave_SQL_Running"] == "Yes"), SecondsBehind: sb})
 }
 func executeSQL(w http.ResponseWriter, r *http.Request) {
 	db, ok := getDB(w, r, "/api/baseservices/mysql/execsql/")
@@ -1454,134 +978,93 @@ func executeSQL(w http.ResponseWriter, r *http.Request) {
 		SQL string `json:"sql"`
 	}
 	var req Req
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-	req.SQL = strings.TrimSpace(req.SQL)
-	if req.SQL == "" {
-		http.Error(w, "empty SQL", http.StatusBadRequest)
+	json.NewDecoder(r.Body).Decode(&req)
+	if strings.TrimSpace(req.SQL) == "" {
+		http.Error(w, "empty", 400)
 		return
 	}
 	rows, err := db.Query(req.SQL)
-	// If error, return JSON with error field
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(SqlResult{Error: err.Error()})
 		return
 	}
 	defer rows.Close()
-
 	cols, _ := rows.Columns()
 	var allRows [][]string
 	for rows.Next() {
-		colsData := make([]sql.NullString, len(cols))
+		vals := make([]sql.NullString, len(cols))
 		ptrs := make([]interface{}, len(cols))
-		for i := range colsData {
-			ptrs[i] = &colsData[i]
+		for i := range vals {
+			ptrs[i] = &vals[i]
 		}
 		rows.Scan(ptrs...)
 		row := make([]string, len(cols))
-		for i, d := range colsData {
-			if d.Valid {
-				row[i] = d.String
+		for i, v := range vals {
+			if v.Valid {
+				row[i] = v.String
 			} else {
 				row[i] = "NULL"
 			}
 		}
 		allRows = append(allRows, row)
 	}
-
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(SqlResult{
-		Columns: cols,
-		Rows:    allRows,
-	})
+	json.NewEncoder(w).Encode(SqlResult{Columns: cols, Rows: allRows})
 }
-
-// ---------------- 业务逻辑 (Original Agent) ----------------
-
-// ISO Mount (Upload mode)
 func handleIsoMount(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Transfer-Encoding", "chunked")
 	f, _ := w.(http.Flusher)
 	fmt.Fprintf(w, ">>> Upload ISO...\n")
 	f.Flush()
-	// Limit upload size to prevent DoS
-	r.ParseMultipartForm(10 << 30) // 10 GB
+	r.ParseMultipartForm(10 << 30)
 	file, _, err := r.FormFile("file")
 	if err != nil {
-		fmt.Fprintf(w, "❌ Error getting file: %v\n", err)
 		return
 	}
 	defer file.Close()
-	dst, err := os.Create(IsoSavePath)
-	if err != nil {
-		fmt.Fprintf(w, "❌ Error creating file: %v\n", err)
-		return
-	}
+	dst, _ := os.Create(IsoSavePath)
 	defer dst.Close()
 	io.Copy(dst, file)
 	mountAndConfigRepo(w, IsoSavePath)
 }
-
-// ISO Mount (Local mode)
 func handleIsoMountLocal(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Transfer-Encoding", "chunked")
 	f, _ := w.(http.Flusher)
 	path := r.FormValue("path")
-	fmt.Fprintf(w, ">>> Checking local file: %s ...\n", path)
+	fmt.Fprintf(w, ">>> Checking: %s\n", path)
 	f.Flush()
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		fmt.Fprintf(w, "❌ File not found: %s\n", path)
+		fmt.Fprintf(w, "Not Found\n")
 		return
 	}
 	mountAndConfigRepo(w, path)
 }
-
-// Shared logic for mounting and repo setup
 func mountAndConfigRepo(w http.ResponseWriter, isoPath string) {
-	f, ok := w.(http.Flusher)
-	fmt.Fprintf(w, ">>> Mounting %s to %s ...\n", isoPath, IsoMountPoint)
-	if ok {
-		f.Flush()
-	}
-
+	f, _ := w.(http.Flusher)
+	fmt.Fprintf(w, ">>> Mounting...\n")
+	f.Flush()
 	os.MkdirAll(IsoMountPoint, 0755)
-	// Ignore umount errors (it might not be mounted)
 	exec.Command("umount", IsoMountPoint).Run()
-
 	if out, err := exec.Command("mount", "-o", "loop", isoPath, IsoMountPoint).CombinedOutput(); err != nil {
-		fmt.Fprintf(w, "❌ Mount failed: %s\n", string(out))
+		fmt.Fprintf(w, "Fail: %s\n", out)
 		return
 	}
-
-	fmt.Fprintf(w, "✅ Mount success. Configuring Repo...\n")
 	os.MkdirAll(RepoBackupDir, 0755)
-	// 使用 bash -c 处理通配符
 	exec.Command("bash", "-c", fmt.Sprintf("mv /etc/yum.repos.d/*.repo %s/", RepoBackupDir)).Run()
-
 	rc := ""
-	// RHEL 8/9 style
 	if _, err := os.Stat(filepath.Join(IsoMountPoint, "BaseOS")); err == nil {
-		rc += fmt.Sprintf("[Local-BaseOS]\nname=BaseOS\nbaseurl=file://%s/BaseOS\ngpgcheck=0\nenabled=1\n\n", IsoMountPoint)
+		rc += fmt.Sprintf("[L-Base]\nname=Base\nbaseurl=file://%s/BaseOS\ngpgcheck=0\nenabled=1\n", IsoMountPoint)
 	}
 	if _, err := os.Stat(filepath.Join(IsoMountPoint, "AppStream")); err == nil {
-		rc += fmt.Sprintf("[Local-AppStream]\nname=AppStream\nbaseurl=file://%s/AppStream\ngpgcheck=0\nenabled=1\n", IsoMountPoint)
+		rc += fmt.Sprintf("[L-App]\nname=App\nbaseurl=file://%s/AppStream\ngpgcheck=0\nenabled=1\n", IsoMountPoint)
 	}
-	// CentOS 7 style
 	if rc == "" {
-		rc = fmt.Sprintf("[Local-ISO]\nname=Local ISO\nbaseurl=file://%s\ngpgcheck=0\nenabled=1\n", IsoMountPoint)
+		rc = fmt.Sprintf("[L-ISO]\nname=ISO\nbaseurl=file://%s\ngpgcheck=0\nenabled=1\n", IsoMountPoint)
 	}
-
 	os.WriteFile("/etc/yum.repos.d/local.repo", []byte(rc), 0644)
-	fmt.Fprintf(w, "✅ Repo written. Cleaning cache...\n")
-	if ok {
-		f.Flush()
-	}
-
+	fmt.Fprintf(w, ">>> Yum makecache...\n")
+	f.Flush()
 	c := exec.Command("bash", "-c", "yum clean all && yum makecache")
 	s, _ := c.StdoutPipe()
 	c.Stderr = c.Stdout
@@ -1589,78 +1072,51 @@ func mountAndConfigRepo(w http.ResponseWriter, isoPath string) {
 	sc := bufio.NewScanner(s)
 	for sc.Scan() {
 		fmt.Fprintln(w, sc.Text())
-		if ok {
-			f.Flush()
-		}
-	}
-	c.Wait()
-	fmt.Fprintf(w, "\n🎉 All Done.\n")
-	if ok {
 		f.Flush()
 	}
+	c.Wait()
+	fmt.Fprintf(w, "Done.\n")
 }
-
 func handleLogDownload(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.Query().Get("key")
-	path, ok := logFileMap[key]
+	path, ok := logFileMap[r.URL.Query().Get("key")]
 	if !ok {
-		http.Error(w, "Unknown Log", 400)
 		return
 	}
 	os.Chmod(path, 0644)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filepath.Base(path)))
 	http.ServeFile(w, r, path)
 }
-
 func handleLogWS(w http.ResponseWriter, r *http.Request) {
-	key := r.URL.Query().Get("key")
-	path, ok := logFileMap[key]
+	path, ok := logFileMap[r.URL.Query().Get("key")]
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		return
 	}
 	defer conn.Close()
 	if !ok {
-		conn.WriteMessage(websocket.TextMessage, []byte("Unknown Log Key"))
+		conn.WriteMessage(websocket.TextMessage, []byte("Bad Key"))
 		return
 	}
 	os.Chmod(path, 0644)
-	if info, err := os.Stat(path); os.IsNotExist(err) {
-		conn.WriteMessage(websocket.TextMessage, []byte("❌ 错误: 日志文件不存在: "+path))
-		return
-	} else if info.Size() == 0 {
-		conn.WriteMessage(websocket.TextMessage, []byte(">>> 提示：日志文件为空，等待写入...\n"))
-	}
 	cmd := exec.Command("tail", "-f", "-n", "200", path)
-	cmd.Stderr = cmd.Stdout
 	out, _ := cmd.StdoutPipe()
 	cmd.Start()
-
-	// Ensure process is killed when websocket closes
-	done := make(chan struct{})
 	defer func() {
-		close(done)
-		if cmd.Process != nil {
-			cmd.Process.Kill()
-		}
+		cmd.Process.Kill()
 		cmd.Wait()
 	}()
-
-	// Fix: Read buffer and clean invalid UTF-8 characters before sending
 	buf := make([]byte, 4096)
 	for {
 		n, err := out.Read(buf)
 		if err != nil {
 			break
 		}
-		// Convert possibly invalid UTF-8 bytes to valid string with replacement char
-		validString := strings.ToValidUTF8(string(buf[:n]), "")
-		if conn.WriteMessage(websocket.TextMessage, []byte(validString)) != nil {
+		valid := strings.ToValidUTF8(string(buf[:n]), "")
+		if conn.WriteMessage(1, []byte(valid)) != nil {
 			break
 		}
 	}
 }
-
 func handleCheckEnv(w http.ResponseWriter, r *http.Request) {
 	res := FullCheckResult{}
 	res.SysInfo.CpuCores = runtime.NumCPU()
@@ -1672,66 +1128,57 @@ func handleCheckEnv(w http.ResponseWriter, r *http.Request) {
 	res.SysInfo.OsName = getOSName()
 	lo := strings.ToLower(res.SysInfo.OsName)
 	res.SysInfo.OsPass = (strings.Contains(lo, "kylin") && strings.Contains(lo, "v10")) || (strings.Contains(lo, "rocky") && strings.Contains(lo, "9"))
-
-	// Metrics: Mem Usage
-	res.SysInfo.MemUsage = 0
 	if mkb > 0 {
 		avail := getMemAvailableKB()
 		if avail > 0 {
 			res.SysInfo.MemUsage = float64(mkb-avail) / float64(mkb) * 100
 		}
 	}
-
-	// Metrics: Load Avg (Linux only)
 	res.SysInfo.LoadAvg = getLoadAvg()
-
 	out, _ := exec.Command("bash", "-c", "ulimit -n").Output()
 	res.SysInfo.Ulimit = strings.TrimSpace(string(out))
 	res.SysInfo.UlimitPass = (res.SysInfo.Ulimit != "1024")
 	cmd := exec.Command("df", "-h")
 	out, _ = cmd.Output()
 	res.SysInfo.DiskDetail = string(out)
-	lines := strings.Split(string(out), "\n")
-	for i, line := range lines {
+	for i, line := range strings.Split(string(out), "\n") {
 		if i == 0 || len(line) == 0 {
 			continue
 		}
 		f := strings.Fields(line)
-		if len(f) >= 6 && !strings.Contains(f[0], "tmpfs") && !strings.Contains(f[0], "overlay") {
+		if len(f) >= 6 && !strings.Contains(f[0], "tmp") && !strings.Contains(f[0], "over") {
 			u, _ := strconv.Atoi(strings.TrimRight(f[4], "%"))
 			res.SysInfo.DiskList = append(res.SysInfo.DiskList, DiskInfo{Mount: f[5], Total: f[1], Used: f[2], Usage: u})
 		}
 	}
-	if out, err := exec.Command("getenforce").Output(); err == nil {
-		res.SecInfo.SELinux = strings.TrimSpace(string(out))
+	if o, err := exec.Command("getenforce").Output(); err == nil {
+		res.SecInfo.SELinux = strings.TrimSpace(string(o))
 	} else {
-		res.SecInfo.SELinux = "Unknown"
+		res.SecInfo.SELinux = "?"
 	}
 	if err := exec.Command("systemctl", "is-active", "firewalld").Run(); err == nil {
-		res.SecInfo.Firewall = "Running"
+		res.SecInfo.Firewall = "On"
 	} else {
-		res.SecInfo.Firewall = "Stopped"
+		res.SecInfo.Firewall = "Off"
 	}
 	res.SecInfo.SshTunnelOk = checkSshConfig()
 	if _, err := os.Stat("/opt/emm/current"); err == nil {
 		res.UemInfo.Installed = true
-		for _, svc := range uemServices {
-			st := "stopped"
-			if err := exec.Command("systemctl", "is-active", svc).Run(); err == nil {
-				st = "running"
-			} else if err := exec.Command("pgrep", "-f", svc).Run(); err == nil {
-				st = "running"
+		for _, s := range uemServices {
+			st := "stop"
+			if err := exec.Command("pgrep", "-f", s).Run(); err == nil {
+				st = "run"
 			}
-			res.UemInfo.Services = append(res.UemInfo.Services, ServiceStat{Name: svc, Status: st})
+			res.UemInfo.Services = append(res.UemInfo.Services, ServiceStat{Name: s, Status: st})
 		}
 	}
 	mClient, err := minio.New(MinioEndpoint, &minio.Options{Creds: credentials.NewStaticV4(MinioUser, MinioPass, ""), Secure: false})
 	if err == nil {
-		exists, errBucket := mClient.BucketExists(context.Background(), MinioBucket)
-		if errBucket == nil && exists {
+		exists, _ := mClient.BucketExists(context.Background(), MinioBucket)
+		if exists {
 			res.MinioInfo.BucketExists = true
-			policy, errPol := mClient.GetBucketPolicy(context.Background(), MinioBucket)
-			if errPol == nil && (strings.Contains(policy, "s3:GetObject") && strings.Contains(policy, "AWS\":[\"*\"]")) {
+			p, _ := mClient.GetBucketPolicy(context.Background(), MinioBucket)
+			if strings.Contains(p, "GetObject") && strings.Contains(p, "*") {
 				res.MinioInfo.Policy = "public"
 			} else {
 				res.MinioInfo.Policy = "private"
@@ -1741,156 +1188,58 @@ func handleCheckEnv(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(res)
 }
-
 func handleFixMinio(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" {
-		http.Error(w, "POST", 400)
-		return
-	}
-	mClient, err := minio.New(MinioEndpoint, &minio.Options{Creds: credentials.NewStaticV4(MinioUser, MinioPass, ""), Secure: false})
-	if err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	policy := fmt.Sprintf(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":["arn:aws:s3:::%s"]},{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::%s/*"]}]}`, MinioBucket, MinioBucket)
-	if err := mClient.SetBucketPolicy(context.Background(), MinioBucket, policy); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.Write([]byte("✅ 权限已修改为 Public"))
+	m, _ := minio.New(MinioEndpoint, &minio.Options{Creds: credentials.NewStaticV4(MinioUser, MinioPass, ""), Secure: false})
+	p := fmt.Sprintf(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":["arn:aws:s3:::%s"]},{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::%s/*"]}]}`, MinioBucket, MinioBucket)
+	m.SetBucketPolicy(context.Background(), MinioBucket, p)
+	w.Write([]byte("Done"))
 }
-
 func handleRestartService(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Query().Get("name")
-	if out, err := exec.Command("systemctl", "restart", name).CombinedOutput(); err != nil {
-		http.Error(w, string(out), 500)
-		return
-	}
-	w.Write([]byte("✅ 指令已发送"))
+	exec.Command("systemctl", "restart", r.URL.Query().Get("name")).Run()
+	w.Write([]byte("Done"))
 }
 func handleFixSelinux(w http.ResponseWriter, r *http.Request) {
 	exec.Command("setenforce", "0").Run()
-	cfg := "/etc/selinux/config"
-	// Check file exists before reading
-	if _, err := os.Stat(cfg); err != nil {
-		w.Write([]byte("❌ Config file not found"))
-		return
-	}
-	d, _ := os.ReadFile(cfg)
-	l := strings.Split(string(d), "\n")
-	var n []string
-	for _, s := range l {
-		if strings.HasPrefix(strings.TrimSpace(s), "SELINUX=") {
-			n = append(n, "SELINUX=disabled")
-		} else {
-			n = append(n, s)
-		}
-	}
-	os.WriteFile(cfg, []byte(strings.Join(n, "\n")), 0644)
-	w.Write([]byte("✅ SELinux Disabled"))
+	d, _ := os.ReadFile("/etc/selinux/config")
+	os.WriteFile("/etc/selinux/config", []byte(strings.Replace(string(d), "SELINUX=enforcing", "SELINUX=disabled", 1)), 0644)
+	w.Write([]byte("Done"))
 }
 func handleFixFirewall(w http.ResponseWriter, r *http.Request) {
 	exec.Command("systemctl", "stop", "firewalld").Run()
 	exec.Command("systemctl", "disable", "firewalld").Run()
-	exec.Command("ufw", "disable").Run()
-	exec.Command("iptables", "-F").Run()
-	w.Write([]byte("✅ 防火墙已关闭"))
+	w.Write([]byte("Done"))
 }
 func handleFixSsh(w http.ResponseWriter, r *http.Request) {
-	if err := autoFixSshConfig(); err != nil {
-		http.Error(w, err.Error(), 500)
-		return
-	}
-	w.Write([]byte("✅ 修复指令已发送"))
+	autoFixSshConfig()
+	w.Write([]byte("Done"))
 }
 func autoFixSshConfig() error {
-	cfg := "/etc/ssh/sshd_config"
-	if _, err := os.Stat(cfg); os.IsNotExist(err) {
-		return fmt.Errorf("sshd_config not found")
+	d, _ := os.ReadFile("/etc/ssh/sshd_config")
+	if !strings.Contains(string(d), "AllowTcpForwarding yes") {
+		f, _ := os.OpenFile("/etc/ssh/sshd_config", os.O_APPEND|os.O_WRONLY, 0644)
+		f.WriteString("\nAllowTcpForwarding yes\n")
+		f.Close()
+		exec.Command("systemctl", "restart", "sshd").Run()
 	}
-	d, err := os.ReadFile(cfg)
-	if err != nil {
-		return err
-	}
-	lines := strings.Split(string(d), "\n")
-	hasY, hasN := false, false
-	for _, l := range lines {
-		t := strings.ToLower(strings.TrimSpace(l))
-		if strings.HasPrefix(t, "#") {
-			continue
-		}
-		if strings.HasPrefix(t, "allowtcpforwarding") {
-			if strings.Contains(t, "yes") {
-				hasY = true
-			}
-			if strings.Contains(t, "no") {
-				hasN = true
-			}
-		}
-	}
-	if hasY && !hasN {
-		return nil
-	}
-	os.WriteFile(cfg+".bak_cncy", d, 0644)
-	var newL []string
-	for _, l := range lines {
-		if !strings.Contains(strings.ToLower(l), "allowtcpforwarding") {
-			newL = append(newL, l)
-		}
-	}
-	newL = append(newL, "", "AllowTcpForwarding yes", "")
-	os.WriteFile(cfg, []byte(strings.Join(newL, "\n")), 0644)
-	exec.Command("systemctl", "restart", "sshd").Run()
-	exec.Command("service", "sshd", "restart").Run()
-	time.Sleep(1 * time.Second)
 	return nil
 }
 func checkSshConfig() bool {
-	f, err := os.Open("/etc/ssh/sshd_config")
-	if err != nil {
-		return false
-	}
-	defer f.Close()
-	s := bufio.NewScanner(f)
-	y, n := false, false
-	for s.Scan() {
-		l := strings.ToLower(strings.TrimSpace(s.Text()))
-		if strings.HasPrefix(l, "#") {
-			continue
-		}
-		if strings.HasPrefix(l, "allowtcpforwarding") {
-			if strings.Contains(l, "yes") {
-				y = true
-			}
-			if strings.Contains(l, "no") {
-				n = true
-			}
-		}
-	}
-	return y && !n
+	d, _ := os.ReadFile("/etc/ssh/sshd_config")
+	return strings.Contains(string(d), "AllowTcpForwarding yes")
 }
 func handleUpload(w http.ResponseWriter, r *http.Request) {
 	r.ParseMultipartForm(500 << 20)
-	f, h, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "Upload failed", 500)
-		return
-	}
+	f, h, _ := r.FormFile("file")
 	defer f.Close()
-	dstPath := filepath.Join(UploadTargetDir, h.Filename)
-	dst, _ := os.Create(dstPath)
+	dst, _ := os.Create(filepath.Join(UploadTargetDir, h.Filename))
 	defer dst.Close()
 	io.Copy(dst, f)
-	exec.Command("tar", "-zxvf", dstPath, "-C", UploadTargetDir).Run()
+	exec.Command("tar", "-zxvf", filepath.Join(UploadTargetDir, h.Filename), "-C", UploadTargetDir).Run()
 	w.Write([]byte("OK"))
 }
 func handleUploadAny(w http.ResponseWriter, r *http.Request) {
 	r.ParseMultipartForm(500 << 20)
-	f, h, err := r.FormFile("file")
-	if err != nil {
-		http.Error(w, "Upload failed", 500)
-		return
-	}
+	f, h, _ := r.FormFile("file")
 	defer f.Close()
 	d := r.FormValue("path")
 	if d == "" {
@@ -1906,12 +1255,7 @@ func handleFsList(w http.ResponseWriter, r *http.Request) {
 	if dir == "" {
 		dir = "/root"
 	}
-	es, err := os.ReadDir(dir)
-	if err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, "[]")
-		return
-	}
+	es, _ := os.ReadDir(dir)
 	var fs []FileInfo
 	for _, e := range es {
 		i, _ := e.Info()
@@ -1930,22 +1274,18 @@ func handleFsDownload(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, p)
 }
 func handleRpmInstall(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Transfer-Encoding", "chunked")
+	w.Header().Set("Content-Type", "text/plain")
 	f, _ := w.(http.Flusher)
 	fmt.Fprintf(w, ">>> Upload...\n")
 	f.Flush()
 	r.ParseMultipartForm(500 << 20)
-	file, h, err := r.FormFile("file")
-	if err != nil {
-		return
-	}
+	file, h, _ := r.FormFile("file")
 	defer file.Close()
 	p := filepath.Join(RpmCacheDir, h.Filename)
 	d, _ := os.Create(p)
 	io.Copy(d, file)
 	d.Close()
-	fmt.Fprintf(w, ">>> rpm -Uvh...\n")
+	fmt.Fprintf(w, ">>> Install...\n")
 	f.Flush()
 	c := exec.Command("rpm", "-Uvh", "--replacepkgs", p)
 	s, _ := c.StdoutPipe()
@@ -1957,53 +1297,18 @@ func handleRpmInstall(w http.ResponseWriter, r *http.Request) {
 		f.Flush()
 	}
 	c.Wait()
-	fmt.Fprintf(w, "\nDone.\n")
-	f.Flush()
+	fmt.Fprintf(w, "Done.\n")
 }
-
 func handleDeployWS(w http.ResponseWriter, r *http.Request) {
-	scriptType := r.URL.Query().Get("type")
-	var scriptPath string
-	var scriptName string
-
-	if scriptType == "install" {
-		scriptName = InstallScript
-	} else if scriptType == "update" {
-		scriptName = UpdateScript
-	} else {
-		http.Error(w, "Invalid script type", 400)
-		return
-	}
-
-	scriptPath = filepath.Join(InstallWorkDir, scriptName)
-
-	if _, err := os.Stat(scriptPath); os.IsNotExist(err) {
-		conn, err := upgrader.Upgrade(w, r, nil)
-		if err != nil {
-			return
+	startPTYSession(w, r, exec.Command("/bin/bash", filepath.Join(InstallWorkDir, func() string {
+		if r.URL.Query().Get("type") == "install" {
+			return InstallScript
 		}
-		defer conn.Close()
-		msg := fmt.Sprintf("❌ Error: Script '%s' not found in '%s'", scriptName, InstallWorkDir)
-		conn.WriteMessage(websocket.TextMessage, []byte(msg))
-		return
-	}
-	os.Chmod(scriptPath, 0755)
-
-	c := exec.Command("/bin/bash", scriptPath)
-	c.Dir = InstallWorkDir
-	c.Env = append(os.Environ(), "TERM=xterm-256color", "HOME=/root")
-	startPTYSession(w, r, c)
+		return UpdateScript
+	}())))
 }
-
 func handleSysTermWS(w http.ResponseWriter, r *http.Request) {
-	sh := "/bin/bash"
-	if _, err := os.Stat(sh); os.IsNotExist(err) {
-		sh = "/bin/sh"
-	}
-	c := exec.Command(sh)
-	c.Env = append(os.Environ(), "TERM=xterm-256color", "HOME=/root")
-	c.Dir = "/root"
-	startPTYSession(w, r, c)
+	startPTYSession(w, r, exec.Command("/bin/bash"))
 }
 func startPTYSession(w http.ResponseWriter, r *http.Request, c *exec.Cmd) {
 	conn, err := upgrader.Upgrade(w, r, nil)
@@ -2011,26 +1316,23 @@ func startPTYSession(w http.ResponseWriter, r *http.Request, c *exec.Cmd) {
 		return
 	}
 	defer conn.Close()
-	ptmx, tty, err := pty.Open()
+	ptmx, _, err := pty.Open()
 	if err != nil {
-		conn.WriteMessage(websocket.TextMessage, []byte("Err:"+err.Error()))
 		return
 	}
-	defer tty.Close()
-	c.Stdout = tty
-	c.Stdin = tty
-	c.Stderr = tty
+	defer ptmx.Close()
+	c.Stdout = ptmx
+	c.Stdin = ptmx
+	c.Stderr = ptmx
 	if c.SysProcAttr == nil {
 		c.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	c.SysProcAttr.Setsid = true
 	c.SysProcAttr.Setctty = false
 	if err := c.Start(); err != nil {
-		ptmx.Close()
-		conn.WriteMessage(websocket.TextMessage, []byte("Start Err:"+err.Error()))
 		return
 	}
-	defer func() { _ = ptmx.Close(); _ = c.Process.Kill(); _ = c.Wait() }()
+	defer c.Process.Kill()
 	go func() {
 		buf := make([]byte, 2048)
 		for {
@@ -2038,7 +1340,7 @@ func startPTYSession(w http.ResponseWriter, r *http.Request, c *exec.Cmd) {
 			if err != nil {
 				return
 			}
-			if conn.WriteMessage(websocket.TextMessage, buf[:n]) != nil {
+			if conn.WriteMessage(1, buf[:n]) != nil {
 				return
 			}
 		}
@@ -2078,17 +1380,14 @@ func getMemTotalKB() uint64 {
 	defer f.Close()
 	s := bufio.NewScanner(f)
 	for s.Scan() {
-		l := s.Text()
-		if strings.HasPrefix(l, "MemTotal:") {
+		if strings.HasPrefix(s.Text(), "MemTotal:") {
 			var k uint64
-			fmt.Sscanf(strings.Fields(l)[1], "%d", &k)
+			fmt.Sscanf(strings.Fields(s.Text())[1], "%d", &k)
 			return k
 		}
 	}
 	return 0
 }
-
-// Helper: Get available memory for chart
 func getMemAvailableKB() uint64 {
 	f, err := os.Open("/proc/meminfo")
 	if err != nil {
@@ -2097,34 +1396,24 @@ func getMemAvailableKB() uint64 {
 	defer f.Close()
 	s := bufio.NewScanner(f)
 	for s.Scan() {
-		l := s.Text()
-		if strings.HasPrefix(l, "MemAvailable:") {
+		if strings.HasPrefix(s.Text(), "MemAvailable:") {
 			var k uint64
-			fmt.Sscanf(strings.Fields(l)[1], "%d", &k)
+			fmt.Sscanf(strings.Fields(s.Text())[1], "%d", &k)
 			return k
 		}
 	}
 	return 0
 }
-
-// Helper: Get load avg
 func getLoadAvg() float64 {
-	d, err := os.ReadFile("/proc/loadavg")
-	if err != nil {
+	d, _ := os.ReadFile("/proc/loadavg")
+	if len(d) == 0 {
 		return 0
 	}
-	parts := strings.Fields(string(d))
-	if len(parts) > 0 {
-		v, _ := strconv.ParseFloat(parts[0], 64)
-		return v
-	}
-	return 0
+	v, _ := strconv.ParseFloat(strings.Fields(string(d))[0], 64)
+	return v
 }
 func getOSName() string {
-	f, err := os.Open("/etc/os-release")
-	if err != nil {
-		return "Unknown"
-	}
+	f, _ := os.Open("/etc/os-release")
 	defer f.Close()
 	s := bufio.NewScanner(f)
 	n, v := "", ""
