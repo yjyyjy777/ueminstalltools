@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"os/exec"
@@ -31,59 +32,55 @@ var (
 
 // 配置常量
 const (
-	// 本地预编译好的两个文件
+	// LocalAgentAMD64 是本地预编译好的 AMD64 架构的 agent 文件
 	LocalAgentAMD64 = "cncyagent_amd64"
+	// LocalAgentARM64 是本地预编译好的 ARM64 架构的 agent 文件
 	LocalAgentARM64 = "cncyagent_arm64"
-	// 远程统一路径
+	// RemotePath 是 agent 在远程服务器上的统一路径
 	RemotePath = "/root/cncyagent"
-	RemoteLog  = "/root/agent.log"
+	// RemoteLog 是 agent 在远程服务器上的日志文件路径
+	RemoteLog = "/root/agent.log"
 )
 
 func main() {
 	myApp := app.New()
-	myApp.Settings().SetTheme(theme.LightTheme())
-
 	myWindow := myApp.NewWindow("智能部署工具")
 	myWindow.Resize(fyne.NewSize(550, 500))
 
-	// --- 2. SSH 输入 ---
+	// --- UI 组件定义 ---
 	ipEntry := widget.NewEntry()
 	ipEntry.SetPlaceHolder("172.16.10.151")
-	sshPortEntry := widget.NewEntry()
-	sshPortEntry.SetText("22")
+	passEntry := widget.NewPasswordEntry()
+	passEntry.SetPlaceHolder("请输入密码")
 	userEntry := widget.NewEntry()
 	userEntry.SetText("root")
-	passEntry := widget.NewPasswordEntry()
-	passEntry.SetPlaceHolder("Password")
+	sshPortEntry := widget.NewEntry()
+	sshPortEntry.SetText("22")
 
-	sshForm := container.NewGridWithColumns(1,
-		widget.NewFormItem("IP 地址", ipEntry).Widget,
-		container.NewGridWithColumns(2,
-			widget.NewFormItem("端口", sshPortEntry).Widget,
-			widget.NewFormItem("用户", userEntry).Widget,
+	sshForm := container.NewVBox(
+		widget.NewForm(
+			widget.NewFormItem("IP 地址", ipEntry),
+			widget.NewFormItem("密码", passEntry),
 		),
-		widget.NewFormItem("密码", passEntry).Widget,
+		container.NewGridWithColumns(2,
+			widget.NewFormItem("用户", userEntry).Widget,
+			widget.NewFormItem("端口", sshPortEntry).Widget,
+		),
 	)
 	sshCard := widget.NewCard("SSH 服务器连接", "", container.NewPadded(sshForm))
 
-	// --- 3. 端口配置 ---
 	localViewEntry := widget.NewEntry()
 	localViewEntry.SetText("9999")
-	lblLocal := widget.NewLabel("本地访问端口 (Local)")
-	lblLocal.TextStyle = fyne.TextStyle{Bold: true}
-
 	remoteAppEntry := widget.NewEntry()
-	remoteAppEntry.SetText("9898") // 默认 9898
-	lblRemote := widget.NewLabel("远端监听端口 (Remote)")
-	lblRemote.TextStyle = fyne.TextStyle{Bold: true}
+	remoteAppEntry.SetText("9898")
 
-	portGrid := container.NewGridWithColumns(2,
-		container.NewVBox(lblLocal, localViewEntry),
-		container.NewVBox(lblRemote, remoteAppEntry),
-	)
-	portCard := widget.NewCard("端口隧道配置", "", container.NewPadded(portGrid))
+	portCard := widget.NewCard("端口隧道配置", "", container.NewPadded(
+		container.NewGridWithColumns(2,
+			container.NewVBox(widget.NewLabelWithStyle("本地访问端口 (Local)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), localViewEntry),
+			container.NewVBox(widget.NewLabelWithStyle("远端监听端口 (Remote)", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}), remoteAppEntry),
+		),
+	))
 
-	// --- 4. 状态日志 ---
 	statusLabel := widget.NewLabel("准备就绪...")
 	statusLabel.Wrapping = fyne.TextWrapWord
 	statusLabel.Alignment = fyne.TextAlignCenter
@@ -91,23 +88,40 @@ func main() {
 	progressBar.Hide()
 	statusCard := widget.NewCard("", "", container.NewVBox(progressBar, statusLabel))
 
-	// --- 5. 按钮 ---
 	var btnStart, btnStop, btnBrowser *widget.Button
-	logUI := func(msg string) { statusLabel.SetText(msg); statusLabel.Refresh() }
 
-	// [启动]
-	btnStart = widget.NewButtonWithIcon("智能部署 (Start)", theme.MediaPlayIcon(), func() {
-		if isRunning {
-			return
+	logUI := func(msg string) {
+		statusLabel.SetText(msg)
+		statusLabel.Refresh()
+	}
+
+	// 启用/禁用所有输入控件
+	setInputsDisabled := func(disabled bool) {
+		if disabled {
+			ipEntry.Disable()
+			passEntry.Disable()
+			userEntry.Disable()
+			sshPortEntry.Disable()
+			localViewEntry.Disable()
+			remoteAppEntry.Disable()
+		} else {
+			ipEntry.Enable()
+			passEntry.Enable()
+			userEntry.Enable()
+			sshPortEntry.Enable()
+			localViewEntry.Enable()
+			remoteAppEntry.Enable()
 		}
+	}
+
+	btnStart = widget.NewButtonWithIcon("智能部署 (Start)", theme.MediaPlayIcon(), func() {
 		ip, port, user, pass := ipEntry.Text, sshPortEntry.Text, userEntry.Text, passEntry.Text
 		lPort, rPort := localViewEntry.Text, remoteAppEntry.Text
 
 		if ip == "" || pass == "" {
-			dialog.ShowError(fmt.Errorf("请填写完整信息"), myWindow)
+			dialog.ShowError(fmt.Errorf("请填写 IP 地址和密码"), myWindow)
 			return
 		}
-		// 检查本地文件
 		if _, err := os.Stat(LocalAgentAMD64); os.IsNotExist(err) {
 			dialog.ShowError(fmt.Errorf("缺失文件: %s", LocalAgentAMD64), myWindow)
 			return
@@ -117,31 +131,22 @@ func main() {
 			return
 		}
 
+		setInputsDisabled(true)
 		btnStart.Disable()
-		ipEntry.Disable()
-		sshPortEntry.Disable()
-		userEntry.Disable()
-		passEntry.Disable()
-		localViewEntry.Disable()
-		remoteAppEntry.Disable()
 		progressBar.Show()
 		logUI("🚀 正在连接服务器...")
 
 		go func() {
 			err := runDeployProcess(ip, port, user, pass, lPort, rPort, logUI)
+
+			// 直接在goroutine中更新UI，以兼容旧版Fyne
+			progressBar.Hide()
 			if err != nil {
-				progressBar.Hide()
+				setInputsDisabled(false)
 				btnStart.Enable()
-				ipEntry.Enable()
-				sshPortEntry.Enable()
-				userEntry.Enable()
-				passEntry.Enable()
-				localViewEntry.Enable()
-				remoteAppEntry.Enable()
 				logUI("❌ " + err.Error())
 				dialog.ShowError(err, myWindow)
 			} else {
-				progressBar.Hide()
 				isRunning = true
 				currentLocalPort = lPort
 				btnStop.Enable()
@@ -153,58 +158,46 @@ func main() {
 	})
 	btnStart.Importance = widget.HighImportance
 
-	// [浏览器]
 	btnBrowser = widget.NewButtonWithIcon("打开浏览器", theme.HomeIcon(), func() {
 		if currentLocalPort != "" {
 			openBrowser("http://localhost:" + currentLocalPort)
 		}
 	})
-	btnBrowser.Disable()
 
-	// [停止]
 	btnStop = widget.NewButtonWithIcon("停止 (Stop)", theme.MediaStopIcon(), func() {
-		if !isRunning {
-			return
-		}
 		logUI("正在断开连接...")
 		go func() {
 			if sshClient != nil {
-				s, _ := sshClient.NewSession()
-				// 远程文件名固定为 cncyagent
-				s.Run("pkill -f cncyagent")
-				s.Close()
-				sshClient.Close()
+				s, err := sshClient.NewSession()
+				if err == nil {
+					_ = s.Run("pkill -f cncyagent")
+					_ = s.Close()
+				}
+				_ = sshClient.Close()
 			}
 			if localListener != nil {
-				localListener.Close()
+				_ = localListener.Close()
 			}
 			isRunning = false
 
+			// 直接在goroutine中更新UI，以兼容旧版Fyne
+			setInputsDisabled(false)
+			btnStart.Enable()
 			btnStop.Disable()
 			btnBrowser.Disable()
-			btnStart.Enable()
-
-			ipEntry.Enable()
-			sshPortEntry.Enable()
-			userEntry.Enable()
-			passEntry.Enable()
-			localViewEntry.Enable()
-			remoteAppEntry.Enable()
 			logUI("👋 已停止")
 		}()
 	})
-	btnStop.Disable()
 
-	// 布局
+	// 设置初始UI状态
+	btnStart.Enable()
+	btnStop.Disable()
+	btnBrowser.Disable()
+
 	btnGroup := container.NewGridWithColumns(3, btnStart, btnBrowser, btnStop)
-	mainLayout := container.NewVBox(
-		sshCard,
-		portCard,
-		statusCard,
-		layout.NewSpacer(),
-		btnGroup,
-	)
+	mainLayout := container.NewVBox(sshCard, portCard, statusCard, layout.NewSpacer(), btnGroup)
 	myWindow.SetContent(container.NewPadded(mainLayout))
+
 	myWindow.SetCloseIntercept(func() {
 		if isRunning {
 			dialog.ShowConfirm("退出", "服务正在运行，确认退出？", func(b bool) {
@@ -218,6 +211,7 @@ func main() {
 			myWindow.Close()
 		}
 	})
+
 	myWindow.ShowAndRun()
 }
 
@@ -238,13 +232,13 @@ func runDeployProcess(host, port, user, pass, localPort, remotePort string, logF
 	logFunc("🔍 检测架构...")
 	sessArch, _ := client.NewSession()
 	outArch, err := sessArch.Output("uname -m")
-	sessArch.Close()
+	_ = sessArch.Close()
 	if err != nil {
 		return fmt.Errorf("架构检测失败: %v", err)
 	}
 
 	arch := strings.TrimSpace(string(outArch))
-	localFile := ""
+	var localFile string
 	if arch == "x86_64" {
 		localFile = LocalAgentAMD64
 		logFunc("识别为 x86_64")
@@ -258,8 +252,8 @@ func runDeployProcess(host, port, user, pass, localPort, remotePort string, logF
 	// 3. 清理与上传
 	logFunc("🧹 清理环境...")
 	sessClean, _ := client.NewSession()
-	sessClean.Run(fmt.Sprintf("pkill -f cncyagent; rm -f %s", RemotePath))
-	sessClean.Close()
+	_ = sessClean.Run(fmt.Sprintf("pkill -f cncyagent; rm -f %s", RemotePath))
+	_ = sessClean.Close()
 	time.Sleep(500 * time.Millisecond)
 
 	logFunc("📤 上传组件...")
@@ -271,8 +265,11 @@ func runDeployProcess(host, port, user, pass, localPort, remotePort string, logF
 	logFunc("⚙️ 启动服务...")
 	startCmd := fmt.Sprintf("setenforce 0 || true; chmod +x %s; nohup %s -port %s > %s 2>&1 < /dev/null &", RemotePath, RemotePath, remotePort, RemoteLog)
 	sessStart, _ := client.NewSession()
-	sessStart.Start(startCmd)
-	sessStart.Close()
+	err = sessStart.Start(startCmd)
+	_ = sessStart.Close()
+	if err != nil {
+		return fmt.Errorf("启动远程服务失败: %v", err)
+	}
 	time.Sleep(1 * time.Second)
 
 	// 5. 建立隧道
@@ -290,15 +287,14 @@ func runDeployProcess(host, port, user, pass, localPort, remotePort string, logF
 				return
 			}
 			go func(c net.Conn) {
-				defer c.Close()
-				// 【关键修复】使用 127.0.0.1 而不是 localhost，解决 ARM/IPv6 问题
+				defer func() { _ = c.Close() }()
 				rConn, err := client.Dial("tcp", "127.0.0.1:"+remotePort)
 				if err != nil {
 					return
 				}
-				defer rConn.Close()
-				go io.Copy(rConn, c)
-				io.Copy(c, rConn)
+				defer func() { _ = rConn.Close() }()
+				go func() { _, _ = io.Copy(rConn, c) }()
+				_, _ = io.Copy(c, rConn)
 			}(conn)
 		}
 	}()
@@ -310,33 +306,40 @@ func uploadFile(client *ssh.Client, local, remote string) error {
 	if err != nil {
 		return err
 	}
-	defer sftpClient.Close()
+	defer func() { _ = sftpClient.Close() }()
+
 	src, err := os.Open(local)
 	if err != nil {
 		return err
 	}
-	defer src.Close()
+	defer func() { _ = src.Close() }()
+
 	dst, err := sftpClient.Create(remote)
 	if err != nil {
 		return err
 	}
+	defer func() { _ = dst.Close() }()
+
 	if _, err := io.Copy(dst, src); err != nil {
-		dst.Close()
 		return err
 	}
-	dst.Close()
 	return sftpClient.Chmod(remote, 0777)
 }
 
 func openBrowser(url string) {
 	var cmd string
 	var args []string
-	if runtime.GOOS == "windows" {
+	switch runtime.GOOS {
+	case "windows":
 		cmd = "cmd"
 		args = []string{"/c", "start"}
-	} else {
+	case "darwin":
+		cmd = "open"
+	default: // "linux", "freebsd", "openbsd", "netbsd"
 		cmd = "xdg-open"
 	}
 	args = append(args, url)
-	exec.Command(cmd, args...).Start()
+	if err := exec.Command(cmd, args...).Start(); err != nil {
+		log.Printf("无法打开浏览器: %v", err)
+	}
 }
