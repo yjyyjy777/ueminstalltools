@@ -3,22 +3,30 @@ package main
 import (
 	"bufio"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/creack/pty"
+	"github.com/go-redis/redis/v8"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/gorilla/websocket"
+	"github.com/magiconair/properties"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -56,6 +64,71 @@ var logFileMap = map[string]string{
 	"platform":     "/emm/logs/platform/platform.log",
 }
 
+// --- BaseServices Structs ---
+type Config struct {
+	RedisHost           string `properties:"system.redis.host"`
+	RedisPort           int    `properties:"system.redis.port"`
+	RedisPassword       string `properties:"system.redis.password"`
+	MdmJdbcURL          string `properties:"jdbc.url"`
+	MdmJdbcUsername     string `properties:"jdbc.username"`
+	MdmJdbcPassword     string `properties:"jdbc.password"`
+	MtenantJdbcURL      string `properties:"jdbc.multitenant.url"`
+	MtenantJdbcUsername string `properties:"jdbc.multitenant.username"`
+	MtenantJdbcPassword string `properties:"jdbc.multitenant.password"`
+	RabbitMQAddresses   string `properties:"spring.rabbitmq.addresses"`
+	RabbitMQAdminPort   int    `properties:"rabbitmq.admin.port,default=15672"`
+	MinioURL            string `properties:"storage.minio.url"`
+}
+
+type Metric struct {
+	Time            int64  `json:"time"`
+	Uptime          int64  `json:"uptime"`
+	UptimeStr       string `json:"uptime_str"`
+	Threads         int    `json:"threads"`
+	QPS             int    `json:"qps"`
+	MaxConnections  int    `json:"max_connections"`
+	SlowQueries     int    `json:"slow_queries"`
+	OpenTables      int    `json:"open_tables"`
+	InnoDBBuffUsed  int    `json:"innodb_buff_used"`
+	InnoDBBuffTotal int    `json:"innodb_buff_total"`
+}
+
+type TableStat struct {
+	Name   string `json:"name"`
+	Rows   int    `json:"rows"`
+	SizeMB int    `json:"size_mb"`
+	Ops    int    `json:"ops"`
+}
+
+type ProcessListRow struct {
+	Id      int    `json:"id"`
+	User    string `json:"user"`
+	Host    string `json:"host"`
+	DB      string `json:"db"`
+	Command string `json:"command"`
+	Time    int    `json:"time"`
+	State   string `json:"state"`
+	Info    string `json:"info"`
+}
+
+type ReplicationStatus struct {
+	Role          string `json:"role"`
+	SlaveRunning  bool   `json:"slave_running"`
+	SecondsBehind int    `json:"seconds_behind"`
+}
+
+var appConfig Config
+var (
+	rdb           *redis.Client
+	dbConnections map[string]*sql.DB
+	ctx           = context.Background()
+
+	// QPS 计算相关变量及锁
+	lastQuestions int64
+	lastQTime     time.Time
+	qpsMutex      sync.Mutex
+)
+
 // ================= 2. 前端页面 =================
 const htmlPage = `
 <!DOCTYPE html>
@@ -65,6 +138,7 @@ const htmlPage = `
     <title>综合运维平台</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         body { font-family: 'Segoe UI', sans-serif; background: #2c3e50; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
         .navbar { background: #34495e; padding: 0 20px; height: 50px; display: flex; align-items: center; border-bottom: 1px solid #1abc9c; }
@@ -75,7 +149,7 @@ const htmlPage = `
         .content { flex: 1; position: relative; background: #ecf0f1; overflow-y: auto; }
         .panel { display: none; width: 100%; min-height: 100%; padding: 20px; box-sizing: border-box; }
         .panel.active { display: block; }
-        .container-box { padding: 20px; max-width: 1000px; margin: 0 auto; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; height: 100%; }
+        .container-box { padding: 20px; max-width: 1200px; margin: 0 auto; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; height: 100%; }
         .card { background: white; padding: 15px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 15px; display: flex; flex-direction: column; }
         h3 { margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; color: #2c3e50; display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
         .term-box { flex: 1; background: #1e1e1e; padding: 10px; overflow-y: auto; border-radius: 6px; color: #0f0; font-family: Consolas, monospace; font-size: 13px; white-space: pre-wrap; border: 1px solid #333; }
@@ -114,10 +188,23 @@ const htmlPage = `
         .btn-restart { background: #e74c3c; } .btn-restart:hover { background: #c0392b; }
         .btn-dl-log { background: transparent; border: 1px solid #ccc; color: #666; padding: 2px 6px; border-radius: 3px; font-size: 11px; cursor: pointer; }
         .btn-dl-log:hover { background: #27ae60; color: white; border-color: #27ae60; }
-        input[type="file"], input[type="text"] { border: 1px solid #ccc; padding: 5px; background: white; font-size: 13px; }
+        input[type="file"], input[type="text"], textarea, select { border: 1px solid #ccc; padding: 5px; background: white; font-size: 13px; border-radius: 4px; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
         .about-table td { padding: 10px; }
         .about-table tr:not(:last-child) td { border-bottom: 1px solid #f0f0f0; }
+       .sub-tab-btn { background: #e9ecef; color: #666; border: 1px solid #ddd; padding: 8px 14px; cursor: pointer; }
+       .sub-tab-btn.active { background: #fff; border-bottom-color: #fff; color: #2980b9; font-weight: bold; }
+       .sub-panel { display: none; border: 1px solid #ddd; border-top: none; padding: 15px; background: #fff; }
+       .sub-panel.active { display: block; }
+       .modal-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 100; display: none; }
+        .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 101; width: 90%; max-width: 700px; display: none; max-height: 80vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #dee2e6; padding-bottom: 10px; margin-bottom: 20px; }
+        .modal-title { margin: 0; font-size: 1.25rem; }
+        .modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; }
+        .modal-body { margin-bottom: 20px; }
+        .modal-footer { border-top: 1px solid #dee2e6; padding-top: 15px; margin-top: 20px; text-align: right; }
+       .list-item, .hash-item { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #e9ecef; }
     </style>
 </head>
 <body>
@@ -128,6 +215,7 @@ const htmlPage = `
     <button class="tab-btn" onclick="switchTab('files')">📂 文件管理</button>
     <button class="tab-btn" onclick="switchTab('terminal')">💻 终端</button>
     <button class="tab-btn" onclick="switchTab('logs')">📜 日志查看</button>
+    <button class="tab-btn" onclick="switchTab('baseservices')">⚙️ 基础服务</button>
     <button class="tab-btn" onclick="switchTab('about')">ℹ️ 关于</button>
 </div>
 <div class="content">
@@ -145,68 +233,100 @@ const htmlPage = `
         </div>
     </div>
     
-    <div id="panel-deps" class="panel"><div class="container-box">
-        <div class="card">
-            <h3>💿 ISO 挂载 (配置本地 YUM)</h3>
-            <div style="display:flex; flex-direction:column; gap:10px;">
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <span style="width:80px; color:#666;">上传镜像:</span>
-                    <input type="file" id="isoInput" accept=".iso" style="width:300px;">
-                    <button onclick="mountIso()">上传并挂载</button>
-                </div>
-                <div style="display:flex; align-items:center; gap:10px;">
-                    <span style="width:80px; color:#666;">本地路径:</span>
-                    <input type="text" id="isoPathInput" placeholder="/tmp/kylin.iso" style="width:300px;">
-                    <button class="btn-orange" onclick="mountLocalIso()">使用本地文件</button>
-                </div>
-            </div>
-            <div id="yum-log" class="term-box" style="height:120px;margin-top:10px">等待操作...</div>
-        </div>
-        <div class="card"><h3>🛠️ RPM 安装</h3><div style="display:flex;gap:10px"><input type="file" id="rpmInput" accept=".rpm"><button onclick="installRpm()">执行安装</button></div><div id="rpm-log" class="term-box" style="height:120px;margin-top:10px"></div></div>
-    </div></div>
+    <div id="panel-deps" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card"><h3>💿 ISO 挂载 (配置本地 YUM)</h3><div style="display:flex; flex-direction:column; gap:10px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:80px; color:#666;">上传镜像:</span><input type="file" id="isoInput" accept=".iso" style="width:300px;"><button onclick="mountIso()">上传并挂载</button></div><div style="display:flex; align-items:center; gap:10px;"><span style="width:80px; color:#666;">本地路径:</span><input type="text" id="isoPathInput" placeholder="/tmp/kylin.iso" style="width:300px;"><button class="btn-orange" onclick="mountLocalIso()">使用本地文件</button></div></div><div id="yum-log" class="term-box" style="height:120px;margin-top:10px">等待操作...</div></div><div class="card"><h3>🛠️ RPM 安装</h3><div style="display:flex;gap:10px"><input type="file" id="rpmInput" accept=".rpm"><button onclick="installRpm()">执行安装</button></div><div id="rpm-log" class="term-box" style="height:120px;margin-top:10px"></div></div></div></div>
     
-    <div id="panel-deploy" class="panel"><div class="container-box"><div class="card"><h3>📦 系统包上传</h3><div style="display:flex;gap:10px"><input type="file" id="fileInput" accept=".tar.gz"><button onclick="uploadFile()">上传解压</button><span id="uploadStatus" style="font-weight:bold"></span></div></div><div class="card" style="flex:1"><div style="display:flex;justify-content:space-between;margin-bottom:10px;align-items:center"><h3>脚本执行</h3><div style="display:flex;gap:10px"><button id="btnRunInstall" class="btn-green" onclick="startScript('install')" disabled>部署 (install.sh)</button> <button id="btnRunUpdate" class="btn-orange" onclick="startScript('update')" disabled>更新 (mdm.sh)</button></div></div><div id="deploy-term" style="height:400px;background:#000"></div></div></div></div>
-    <div id="panel-files" class="panel"><div class="container-box"><div class="card" style="height:100%;padding:0"><div style="padding:15px;background:#f8f9fa;border-bottom:1px solid #eee"><div class="fm-toolbar"><button onclick="fmUpDir()">上级</button><button onclick="fmRefresh()">刷新</button><span id="fmPath" style="margin:0 10px;font-weight:bold">/root</span><input type="file" id="fmUploadInput" style="display:none" onchange="fmDoUpload()"><button onclick="document.getElementById('fmUploadInput').click()">上传</button></div><div id="fmStatus" style="font-size:12px;color:#666;height:15px"></div></div><div class="fm-list" style="overflow:auto;height:100%"><table style="width:100%"><tbody id="fmBody"></tbody></table></div></div></div></div>
+    <div id="panel-deploy" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card"><h3>📦 系统包上传</h3><div style="display:flex;gap:10px"><input type="file" id="fileInput" accept=".tar.gz"><button onclick="uploadFile()">上传解压</button><span id="uploadStatus" style="font-weight:bold"></span></div></div><div class="card" style="flex:1"><div style="display:flex;justify-content:space-between;margin-bottom:10px;align-items:center"><h3>脚本执行</h3><div style="display:flex;gap:10px"><button id="btnRunInstall" class="btn-green" onclick="startScript('install')" disabled>部署 (install.sh)</button> <button id="btnRunUpdate" class="btn-orange" onclick="startScript('update')" disabled>更新 (mdm.sh)</button></div></div><div id="deploy-term" style="height:400px;background:#000"></div></div></div></div>
+    <div id="panel-files" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card" style="height:100%;padding:0"><div style="padding:15px;background:#f8f9fa;border-bottom:1px solid #eee"><div class="fm-toolbar"><button onclick="fmUpDir()">上级</button><button onclick="fmRefresh()">刷新</button><span id="fmPath" style="margin:0 10px;font-weight:bold">/root</span><input type="file" id="fmUploadInput" style="display:none" onchange="fmDoUpload()"><button onclick="document.getElementById('fmUploadInput').click()">上传</button></div><div id="fmStatus" style="font-size:12px;color:#666;height:15px"></div></div><div class="fm-list" style="overflow:auto;height:100%"><table style="width:100%"><tbody id="fmBody"></tbody></table></div></div></div></div>
     <div id="panel-terminal" class="panel"><div id="sys-term" class="full-term" style="height:100vh"></div></div>
     <div id="panel-logs" class="panel" style="padding:20px;height:100%"><div class="log-layout"><div class="log-sidebar"><div class="log-sidebar-header">日志列表</div><ul class="log-list"><li class="log-item" onclick="viewLog('tomcat', this)"><span>Tomcat</span> <button class="btn-dl-log" onclick="dlLog('tomcat', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('nginx_access', this)"><span>Nginx Access</span> <button class="btn-dl-log" onclick="dlLog('nginx_access', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('nginx_error', this)"><span>Nginx Error</span> <button class="btn-dl-log" onclick="dlLog('nginx_error', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('app_server', this)"><span>App Server</span> <button class="btn-dl-log" onclick="dlLog('app_server', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('emm_backend', this)"><span>EMM Backend</span> <button class="btn-dl-log" onclick="dlLog('emm_backend', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('license', this)"><span>License</span> <button class="btn-dl-log" onclick="dlLog('license', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('platform', this)"><span>Platform</span> <button class="btn-dl-log" onclick="dlLog('platform', event)"><i class="fas fa-download"></i></button></li></ul></div><div class="log-viewer-container"><div class="log-viewer-header"><span id="logTitle">请选择...</span><div><label><input type="checkbox" id="autoScroll" checked> 自动滚动</label> <button class="btn-sm" onclick="clearLog()">清空</button></div></div><div id="logContent" class="log-content"></div></div></div></div>
+    
+    <div id="panel-baseservices" class="panel">
+       <div class="container-box">
+          <div style="margin-bottom: 15px;">
+             <button class="sub-tab-btn active" onclick="switchSubTab(event, 'bs-overview')">概览</button>
+             <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-redis')">Redis</button>
+             <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-mysql')">MySQL</button>
+          </div>
+          <div id="bs-overview" class="sub-panel active">
+             <div class="grid-4">
+                <div class="card"><a href="javascript:switchSubTab(event, 'bs-redis', true)"><h3>Redis 管理</h3><p>Key/Value 查看、编辑、删除</p></a></div>
+                <div class="card"><a href="javascript:switchSubTab(event, 'bs-mysql', true)"><h3>MySQL 监控</h3><p>性能图表、进程、SQL执行</p></a></div>
+                <div class="card"><a href="/api/baseservices/rabbitmq" target="_blank"><h3>RabbitMQ</h3><p>原生管理后台 (新窗口打开)</p></a></div>
+                <div class="card"><a href="/api/baseservices/minio" target="_blank"><h3>MinIO</h3><p>原生管理后台 (新窗口打开)</p></a></div>
+             </div>
+          </div>
+          <div id="bs-redis" class="sub-panel">
+             <div class="card">
+                <h3>Redis 性能指标</h3>
+                <div id="redis-info-grid" class="grid-4">加载中...</div>
+             </div>
+             <div class="card">
+                <h3>键值管理</h3>
+                <div id="redis-keys-table-container">加载中...</div>
+             </div>
+          </div>
+          <div id="bs-mysql" class="sub-panel">
+             <div class="card">
+                <div style="display:flex; align-items:center; gap:15px; margin-bottom:15px;">
+                   <h3>MySQL 监控</h3>
+                   <select id="db-selector" onchange="mysql.switchDB(this.value)"><option value="mdm">mdm</option><option value="multitenant">multitenant</option></select>
+                   <button class="sub-tab-btn active" onclick="switchSubTab(event, 'mysql-monitor', false, 'mysql-tab-group')">监控</button>
+                    <button class="sub-tab-btn" onclick="switchSubTab(event, 'mysql-sql', false, 'mysql-tab-group')">SQL执行</button>
+                </div>
+                <div id="mysql-monitor" class="mysql-tab-group active">
+                   <div class="grid-4" style="margin-bottom: 15px;">
+                      <div class="card"><h3>Threads</h3><div id="mysql-threads" style="font-size:1.5em;font-weight:bold;">0</div></div>
+                      <div class="card"><h3>QPS</h3><div id="mysql-qps" style="font-size:1.5em;font-weight:bold;">0</div></div>
+                      <div class="card"><h3>Max Connections</h3><div id="mysql-connections" style="font-size:1.5em;font-weight:bold;">0</div></div>
+                      <div class="card"><h3>Uptime</h3><div id="mysql-uptime" style="font-size:1.5em;font-weight:bold;">0</div></div>
+                   </div>
+                   <div class="grid-2">
+                      <div class="card"><h3>性能</h3><canvas id="mysql-metricChart"></canvas></div>
+                      <div class="card"><h3>主从复制</h3><div id="mysql-replStatus"></div><canvas id="mysql-replChart"></canvas></div>
+                      <div class="card"><h3>表空间占用 (Top 10)</h3><canvas id="mysql-tableSizeChart"></canvas></div>
+                      <div class="card"><h3>频繁操作表 (Top 10)</h3><canvas id="mysql-tableOpsChart"></canvas></div>
+                   </div>
+                   <div class="card">
+                      <h3>当前进程</h3>
+                      <input id="mysql-slowFilter" placeholder="过滤SQL..." oninput="mysql.loadProcesslist()">
+                       <div style="max-height: 400px; overflow-y: auto;"><table id="mysql-slowQueryTable"><thead><tr><th>Id</th><th>User</th><th>Host</th><th>DB</th><th>Command</th><th>Time(s)</th><th>State</th><th>Info</th></tr></thead><tbody></tbody></table></div>
+                   </div>
+                </div>
+                <div id="mysql-sql" class="mysql-tab-group" style="display:none;">
+                   <h3>执行SQL</h3>
+                   <textarea id="mysql-sqlInput" rows="5" style="width:100%; font-family:monospace;"></textarea>
+                   <button onclick="mysql.execSQL()" class="btn-green" style="margin-top:10px;">执行</button>
+                   <pre id="mysql-sqlResult" class="term-box" style="margin-top:10px;"></pre>
+                </div>
+             </div>
+          </div>
+       </div>
+    </div>
+
     <div id="panel-about" class="panel">
         <div class="container-box" style="max-width: 800px;">
             <div class="card">
                 <h3>关于智能部署工具</h3>
                 <table class="about-table">
                     <tbody>
-                        <tr>
-                            <td style="width: 100px;"><strong>作者</strong></td>
-                            <td>王凯</td>
-                        </tr>
-                        <tr>
-                            <td><strong>版本</strong></td>
-                            <td>3.2</td>
-                        </tr>
-                        <tr>
-                            <td><strong>更新日期</strong></td>
-                            <td>2024-07-26</td>
-                        </tr>
-                        <tr>
-                            <td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td>
-                            <td>
-                                <ul style="margin:0; padding-left: 20px; line-height: 1.8;">
-                                    <li>系统基础环境、安全配置、服务状态一键体检</li>
-                                    <li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li>
-                                    <li>在线安装 RPM 依赖包</li>
-                                    <li>上传部署包并执行安装/更新脚本</li>
-                                    <li>图形化文件管理（浏览、上传、下载）</li>
-                                    <li>全功能网页 Shell 终端</li>
-                                    <li>实时查看多种 UEM 服务日志</li>
-                                </ul>
-                            </td>
-                        </tr>
+                        <tr><td style="width: 100px;"><strong>作者</strong></td><td>王凯</td></tr>
+                        <tr><td><strong>版本</strong></td><td>3.3 (Fixed)</td></tr>
+                        <tr><td><strong>更新日期</strong></td><td>2024-07-26</td></tr>
+                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端</li><li>实时查看多种 UEM 服务日志</li><li>基础服务(Redis/MySQL)监控与管理</li></ul></td></tr>
                     </tbody>
                 </table>
             </div>
         </div>
     </div>
 </div>
+
+<div id="modal-backdrop" class="modal-backdrop"></div>
+<div id="modal" class="modal">
+    <div class="modal-header"><h2 id="modal-title" class="modal-title"></h2><button id="modal-close-btn" class="modal-close">&times;</button></div>
+    <div id="modal-body" class="modal-body"></div>
+    <div class="modal-footer"><button type="button" id="modal-cancel-btn" class="btn-sm">关闭</button></div>
+</div>
+
 <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
 <script>
@@ -220,6 +340,25 @@ const htmlPage = `
         document.getElementById('panel-'+id).classList.add('active'); event.target.classList.add('active');
         if (id === 'terminal') { if (!sysTerm) initSysTerm(); setTimeout(()=>sysFit.fit(), 200); }
         if (id === 'deploy') { setTimeout(()=>deployFit && deployFit.fit(), 200); }
+       if (id === 'baseservices') { redis.init(); mysql.init(); }
+    }
+    function switchSubTab(event, id, isLink, group) {
+       if (isLink) {
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          const mainBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.includes('基础服务'));
+          if(mainBtn) mainBtn.classList.add('active');
+          document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+          document.getElementById('panel-baseservices').classList.add('active');
+       }
+       const parent = event.target.closest('.panel, .card');
+       const scope = group ? parent.querySelectorAll('.'+group) : parent.querySelectorAll('.sub-panel');
+       scope.forEach(p => { p.style.display = 'none'; p.classList.remove('active'); });
+       const targetPanel = document.getElementById(id);
+       if(targetPanel) { targetPanel.style.display = 'block'; targetPanel.classList.add('active'); }
+       
+       const btnScope = group ? parent.querySelectorAll('.sub-tab-btn[onclick*="'+group+'"]') : parent.querySelectorAll('.sub-tab-btn');
+       btnScope.forEach(b => b.classList.remove('active'));
+       event.target.classList.add('active');
     }
     function getWsUrl(ep) { return (location.protocol==='https:'?'wss://':'ws://') + location.host + location.pathname + ep; }
     function viewLog(key, el) {
@@ -289,25 +428,168 @@ const htmlPage = `
     function fmUpDir() { let p=currentPath.split('/'); p.pop(); let n=p.join('/'); if(!n)n='/'; fmLoadPath(n); }
     function fmDownload(p) { window.location.href = API_BASE + 'fs/download?path=' + encodeURIComponent(p); }
     async function fmDoUpload() { const inp=document.getElementById('fmUploadInput'); const fd=new FormData(); fd.append("file", inp.files[0]); fd.append("path", currentPath); const st=document.getElementById('fmStatus'); st.innerText="Uploading..."; await fetch(API_BASE+'upload_any', {method:'POST', body:fd}); st.innerText="Done"; fmLoadPath(currentPath); }
-    
-    // --- ISO ---
-    async function mountIso() {
-        const inp=document.getElementById('isoInput'); if(!inp.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file",inp.files[0]);
-        const r=await fetch(API_BASE+'iso_mount',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('yum-log'); while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false;
-    }
-    async function mountLocalIso() {
-        const p = document.getElementById('isoPathInput').value; if(!p) return alert("请输入路径"); event.target.disabled=true;
-        const fd=new FormData(); fd.append("path", p);
-        const r=await fetch(API_BASE+'iso_mount_local',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('yum-log'); box.innerText = ">>> 正在使用本地文件挂载...\n";
-        while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false;
-    }
-
+    async function mountIso() { const inp=document.getElementById('isoInput'); if(!inp.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file",inp.files[0]); const r=await fetch(API_BASE+'iso_mount',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('yum-log'); while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
+    async function mountLocalIso() { const p = document.getElementById('isoPathInput').value; if(!p) return alert("请输入路径"); event.target.disabled=true; const fd=new FormData(); fd.append("path", p); const r=await fetch(API_BASE+'iso_mount_local',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('yum-log'); box.innerText = ">>> 正在使用本地文件挂载...\n"; while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
     async function installRpm() { const i=document.getElementById('rpmInput'); if(!i.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file",i.files[0]); const r=await fetch(API_BASE+'rpm_install',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('rpm-log'); while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
     async function uploadFile() { const i=document.getElementById('fileInput'); if(!i.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file", i.files[0]); try { const r=await fetch(UPLOAD_URL, {method:'POST', body:fd}); if(r.ok) { document.getElementById('uploadStatus').innerHTML = "<span class='pass'>✅ 成功</span>"; document.getElementById('btnRunInstall').disabled=false; document.getElementById('btnRunUpdate').disabled=false; } else { throw await r.text(); } } catch(e){alert("Error: "+e);} event.target.disabled=false; }
     function startScript(type) { if(deployTerm) deployTerm.dispose(); if(deploySocket) deploySocket.close(); deployTerm=new Terminal({cursorBlink:true,fontSize:13,theme:{background:'#000'}}); deployFit=new FitAddon.FitAddon(); deployTerm.loadAddon(deployFit); deployTerm.open(document.getElementById('deploy-term')); deployFit.fit(); deploySocket=new WebSocket(getWsUrl("ws/deploy?type="+type)); setupSocket(deploySocket, deployTerm, deployFit); document.getElementById('btnRunInstall').disabled=true; document.getElementById('btnRunUpdate').disabled=true; }
-    function startDeployTerm() { startScript('install'); }
     function initSysTerm() { sysTerm=new Terminal({cursorBlink:true,fontSize:14,fontFamily:'Consolas, monospace'}); sysFit=new FitAddon.FitAddon(); sysTerm.loadAddon(sysFit); sysTerm.open(document.getElementById('sys-term')); sysFit.fit(); sysSocket=new WebSocket(getWsUrl("ws/terminal")); setupSocket(sysSocket, sysTerm, sysFit); }
     function setupSocket(s, t, f) { s.onopen=()=>{s.send(JSON.stringify({type:"resize",cols:t.cols,rows:t.rows}));f.fit();}; s.onmessage=e=>t.write(e.data); t.onData(d=>{if(s.readyState===1)s.send(JSON.stringify({type:"input",data:d}));}); window.addEventListener('resize',()=>{f.fit();if(s.readyState===1)s.send(JSON.stringify({type:"resize",cols:t.cols,rows:t.rows}));}); }
+    function escapeHtml(unsafe) { return unsafe ? unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;") : ''; }
+
+    const redis = {
+       allKeys: [], currentFilter: 'all', initialized: false,
+       init: function() { if(this.initialized) return; this.fetchInfo(); this.fetchAllKeys(); this.initialized = true; },
+       fetchInfo: async function() {
+          try {
+             const res = await fetch('/api/baseservices/redis/info'); if (!res.ok) throw new Error('Failed to fetch info');
+             const info = await res.json();
+             const metrics = {'redis_version': 'Version', 'uptime_in_days': 'Uptime (Days)', 'connected_clients': 'Clients', 'used_memory_human': 'Memory', 'total_commands_processed': 'Commands', 'instantaneous_ops_per_sec': 'Ops/Sec'};
+             const grid = document.getElementById('redis-info-grid'); grid.innerHTML = '';
+             for (const key in metrics) {
+                if (info[key]) grid.innerHTML += '<div class="card"><h3>' + metrics[key] + '</h3><p style="font-size:1.5em;font-weight:bold;">' + info[key] + '</p></div>';
+             }
+          } catch (e) { document.getElementById('redis-info-grid').innerHTML = '<p class="fail">Failed to load Redis stats.</p>'; }
+       },
+       fetchAllKeys: async function() {
+          try {
+             const res = await fetch('/api/baseservices/redis/keys'); if (!res.ok) throw new Error('Failed to fetch keys');
+             this.allKeys = await res.json() || []; this.allKeys.sort((a, b) => a.key.localeCompare(b.key));
+             this.renderTable();
+          } catch (e) { document.getElementById('redis-keys-table-container').innerHTML = '<p class="fail">Failed to load keys.</p>'; }
+       },
+       renderTable: function() {
+          let html = '<table><thead><tr><th>Key</th><th>Type</th><th>Actions</th></tr></thead><tbody>';
+          this.allKeys.forEach(item => {
+             html += '<tr><td title="' + escapeHtml(item.key) + '">' + escapeHtml(item.key) + '</td><td>' + escapeHtml(item.type) + '</td>' +
+                   '<td><button class="btn-sm" onclick="redis.viewEditKey(\'' + item.key + '\', \'' + item.type + '\')">View/Edit</button> ' +
+                   '<button class="btn-sm btn-red" onclick="redis.deleteKey(\'' + item.key + '\')">Delete</button></td></tr>';
+          });
+          html += '</tbody></table>';
+          document.getElementById('redis-keys-table-container').innerHTML = html;
+       },
+       deleteKey: async function(key) {
+          if (!confirm('确认删除: ' + key + '?')) return;
+          await fetch('/api/baseservices/redis/key?key=' + encodeURIComponent(key), { method: 'DELETE' });
+          this.fetchAllKeys();
+       },
+       viewEditKey: async function(key, type) {
+          const modalTitle = document.getElementById('modal-title'); const modalBody = document.getElementById('modal-body');
+          modalTitle.textContent = 'Editing ' + type + ': ' + key; modalBody.innerHTML = '<p>Loading...</p>';
+          document.getElementById('modal-backdrop').style.display = 'block'; document.getElementById('modal').style.display = 'block';
+          const res = await fetch('/api/baseservices/redis/value?type=' + type + '&key=' + encodeURIComponent(key));
+          const data = await res.json();
+          this.renderModalContent(data);
+       },
+       renderModalContent: function(data) {
+          let body = '';
+          switch (data.type) {
+             case 'string':
+                body = '<div class="form-group"><label for="stringValue">Value</label><textarea id="stringValue" rows="5" style="width:100%">' + escapeHtml(data.value) + '</textarea></div>' +
+                      '<button class="btn-green" onclick="redis.saveStringValue(\'' + data.key + '\')">Save</button>';
+                break;
+             case 'list':
+                let itemsHtml = data.value.map(item => '<div class="list-item"><span>' + escapeHtml(item) + '</span><button class="btn-sm btn-red" onclick="redis.deleteListItem(\'' + data.key + '\', \'' + escapeHtml(item) + '\')">Delete</button></div>').join('');
+                body = '<div class="form-group"><label>Add New Item (LPUSH)</label><input type="text" id="newListItem" placeholder="Enter value" style="width:100%"><button class="btn-green" style="margin-top:10px;" onclick="redis.addListItem(\'' + data.key + '\')">Add</button></div><hr>' + itemsHtml;
+                break;
+             case 'hash':
+                let fieldsHtml = Object.entries(data.value).map(([field, value]) => '<div class="hash-item"><span><strong>' + escapeHtml(field) + ':</strong> ' + escapeHtml(value) + '</span><button class="btn-sm btn-red" onclick="redis.deleteHashField(\'' + data.key + '\', \'' + escapeHtml(field) + '\')">Delete</button></div>').join('');
+                body = '<div class="form-group"><label>Add/Edit Field</label><input type="text" id="newHashField" placeholder="Field name" style="width:100%; margin-bottom:5px;"><textarea id="newHashValue" placeholder="Field value" style="width:100%"></textarea><button class="btn-green" style="margin-top:10px;" onclick="redis.addHashField(\'' + data.key + '\')">Save Field</button></div><hr>' + fieldsHtml;
+                break;
+             default: body = '<p>Unsupported type: ' + data.type + '</p>';
+          }
+          document.getElementById('modal-body').innerHTML = body;
+       },
+       saveStringValue: async function(key) {
+          const value = document.getElementById('stringValue').value;
+          await fetch('/api/baseservices/redis/value?type=string&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
+          this.hideModal();
+       },
+       addListItem: async function(key) {
+          const value = document.getElementById('newListItem').value; if (!value) return;
+          await fetch('/api/baseservices/redis/value?type=list&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
+          this.viewEditKey(key, 'list');
+       },
+       deleteListItem: async function(key, value) {
+          await fetch('/api/baseservices/redis/value?type=list&key=' + encodeURIComponent(key) + '&value=' + encodeURIComponent(value), { method: 'DELETE' });
+          this.viewEditKey(key, 'list');
+       },
+       addHashField: async function(key) {
+          const field = document.getElementById('newHashField').value; const value = document.getElementById('newHashValue').value; if (!field) return;
+          await fetch('/api/baseservices/redis/value?type=hash&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field, value }) });
+          this.viewEditKey(key, 'hash');
+       },
+       deleteHashField: async function(key, field) {
+          await fetch('/api/baseservices/redis/value?type=hash&key=' + encodeURIComponent(key) + '&field=' + encodeURIComponent(field), { method: 'DELETE' });
+          this.viewEditKey(key, 'hash');
+       },
+       hideModal: function() { document.getElementById('modal-backdrop').style.display = 'none'; document.getElementById('modal').style.display = 'none'; }
+    };
+    document.getElementById('modal-close-btn').addEventListener('click', () => redis.hideModal());
+    document.getElementById('modal-cancel-btn').addEventListener('click', () => redis.hideModal());
+    document.getElementById('modal-backdrop').addEventListener('click', () => redis.hideModal());
+
+    const mysql = {
+       currentDB: 'mdm', initialized: false, charts: {},
+       init: function() {
+          if(this.initialized) return;
+          this.charts.metric = new Chart(document.getElementById('mysql-metricChart').getContext('2d'), { type: 'line', data: { labels: [], datasets: [{ label: 'Threads', data: [], borderColor: '#2980b9', fill: false }, { label: 'QPS', data: [], borderColor: '#27ae60', fill: false }] }, options: { responsive: true, animation: false } });
+          this.charts.size = new Chart(document.getElementById('mysql-tableSizeChart').getContext('2d'), { type: 'bar', data: { labels: [], datasets: [{ label: 'Size MB', data: [], backgroundColor: 'rgba(52, 152, 219, 0.6)' }] }, options: { responsive: true, indexAxis: 'y' } });
+          this.charts.ops = new Chart(document.getElementById('mysql-tableOpsChart').getContext('2d'), { type: 'bar', data: { labels: [], datasets: [{ label: 'Ops', data: [], backgroundColor: 'rgba(231, 76, 60, 0.6)' }] }, options: { responsive: true, indexAxis: 'y' } });
+          this.charts.repl = new Chart(document.getElementById('mysql-replChart').getContext('2d'), { type: 'line', data: { labels: [], datasets: [{ label: 'Delay(s)', data: [], borderColor: '#c0392b', fill: false }] }, options: { responsive: true, animation: false } });
+          this.loadAll();
+          setInterval(() => this.loadAll(), 10000);
+          this.initialized = true;
+       },
+       switchDB: function(db) { this.currentDB = db; this.loadAll(); },
+       loadAll: async function() {
+          await Promise.all([ this.loadMetrics(), this.loadTables(), this.loadProcesslist(), this.loadRepl() ]);
+       },
+       loadMetrics: async function() {
+          try {
+             const res = await fetch('/api/baseservices/mysql/metrics/' + this.currentDB); const arr = await res.json(); if (!arr || arr.length === 0) return;
+             const m = arr[0];
+             document.getElementById('mysql-threads').innerText = m.threads; document.getElementById('mysql-qps').innerText = m.qps;
+             document.getElementById('mysql-connections').innerText = m.max_connections; document.getElementById('mysql-uptime').innerText = m.uptime_str;
+             const now = new Date().toLocaleTimeString();
+             if (this.charts.metric.data.labels.length > 20) { this.charts.metric.data.labels.shift(); this.charts.metric.data.datasets.forEach(ds => ds.data.shift()); }
+             this.charts.metric.data.labels.push(now); this.charts.metric.data.datasets[0].data.push(m.threads); this.charts.metric.data.datasets[1].data.push(m.qps);
+             this.charts.metric.update();
+          } catch (e) { console.error('mysql.loadMetrics', e); }
+       },
+       loadTables: async function() {
+          try {
+             const res = await fetch('/api/baseservices/mysql/tables/' + this.currentDB); const data = await res.json(); if (!Array.isArray(data)) return;
+             this.charts.size.data.labels = data.map(d => d.name); this.charts.size.data.datasets[0].data = data.map(d => d.size_mb); this.charts.size.update();
+             this.charts.ops.data.labels = data.map(d => d.name); this.charts.ops.data.datasets[0].data = data.map(d => d.ops); this.charts.ops.update();
+          } catch (e) { console.error('mysql.loadTables', e); }
+       },
+       loadProcesslist: async function() {
+          try {
+             const res = await fetch('/api/baseservices/mysql/processlist/' + this.currentDB); const data = await res.json();
+             const filter = document.getElementById('mysql-slowFilter').value.toLowerCase();
+             const tbody = document.querySelector('#mysql-slowQueryTable tbody'); tbody.innerHTML = '';
+             (data || []).forEach(q => {
+                if (filter && (!q.info || !q.info.toLowerCase().includes(filter))) return;
+                tbody.innerHTML += '<tr><td>' + q.id + '</td><td>' + q.user + '</td><td>' + q.host + '</td><td>' + q.db + '</td><td>' + q.command + '</td><td>' + q.time + '</td><td>' + q.state + '</td><td>' + escapeHtml(q.info) + '</td></tr>';
+             });
+          } catch (e) { console.error('mysql.loadProcesslist', e); }
+       },
+       loadRepl: async function() {
+          try {
+             const res = await fetch('/api/baseservices/mysql/replstatus/' + this.currentDB); const r = await res.json();
+             document.getElementById('mysql-replStatus').innerHTML = 'Role: ' + r.role + ' | Slave Running: <span class="' + (r.slave_running ? 'pass' : 'fail') + '">' + r.slave_running + '</span> | Delay(s): ' + r.seconds_behind;
+             if (this.charts.repl.data.labels.length > 20) { this.charts.repl.data.labels.shift(); this.charts.repl.data.datasets[0].data.shift(); }
+             this.charts.repl.data.labels.push(new Date().toLocaleTimeString()); this.charts.repl.data.datasets[0].data.push(r.seconds_behind || 0);
+             this.charts.repl.update();
+          } catch (e) { console.error('mysql.loadRepl', e); }
+       },
+       execSQL: async function() {
+          const sql = document.getElementById('mysql-sqlInput').value.trim(); if (!sql) return;
+          const res = await fetch('/api/baseservices/mysql/execsql/' + this.currentDB, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
+          document.getElementById('mysql-sqlResult').innerText = await res.text();
+       }
+    };
 </script>
 </body>
 </html>
@@ -378,6 +660,12 @@ func main() {
 	os.MkdirAll(RpmCacheDir, 0755)
 	autoFixSshConfig()
 
+	// Init Base Services
+	loadConfig()
+	initRedis()
+	initMySQL()
+
+	// Original Agent Handlers
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(htmlPage))
@@ -394,18 +682,523 @@ func main() {
 	http.HandleFunc("/api/sec/firewall", handleFixFirewall)
 	http.HandleFunc("/api/rpm_install", handleRpmInstall)
 	http.HandleFunc("/api/iso_mount", handleIsoMount)
-	http.HandleFunc("/api/iso_mount_local", handleIsoMountLocal) // 新增
+	http.HandleFunc("/api/iso_mount_local", handleIsoMountLocal)
 	http.HandleFunc("/api/log/download", handleLogDownload)
-
 	http.HandleFunc("/ws/deploy", handleDeployWS)
 	http.HandleFunc("/ws/terminal", handleSysTermWS)
 	http.HandleFunc("/ws/log", handleLogWS)
+
+	// --- BaseServices Handlers ---
+	bsAPI := "/api/baseservices"
+	// Redis
+	http.HandleFunc(bsAPI+"/redis/keys", redisKeysAndTypesHandler)
+	http.HandleFunc(bsAPI+"/redis/info", redisInfoHandler)
+	http.HandleFunc(bsAPI+"/redis/key", redisKeyHandler)
+	http.HandleFunc(bsAPI+"/redis/value", redisValueHandler)
+	// MySQL
+	http.HandleFunc(bsAPI+"/mysql/metrics/", apiMetrics)
+	http.HandleFunc(bsAPI+"/mysql/tables/", apiTables)
+	http.HandleFunc(bsAPI+"/mysql/processlist/", apiProcesslist)
+	http.HandleFunc(bsAPI+"/mysql/replstatus/", apiRepl)
+	http.HandleFunc(bsAPI+"/mysql/execsql/", executeSQL)
+	// Proxies
+	setupProxies(bsAPI)
 
 	fmt.Printf("Agent running on %s\n", ServerPort)
 	http.ListenAndServe("0.0.0.0:"+ServerPort, nil)
 }
 
-// ---------------- 业务逻辑 ----------------
+// --- BaseServices Core Logic ---
+func loadConfig() {
+	prodPath := "/opt/emm/current/config/global.properties"
+	localPath := "global.properties"
+	var p *properties.Properties
+	var err error
+	if _, err = os.Stat(prodPath); err == nil {
+		log.Printf("Loading configuration from production path: %s", prodPath)
+		p, err = properties.LoadFile(prodPath, properties.UTF8)
+	} else {
+		log.Printf("Production config not found. Loading from local path: %s", localPath)
+		p, err = properties.LoadFile(localPath, properties.UTF8)
+	}
+	if err != nil {
+		log.Printf("Warning: Unable to load configuration file: %v", err)
+		return
+	}
+	if err := p.Decode(&appConfig); err != nil {
+		log.Printf("Warning: Error decoding configuration: %v", err)
+	}
+}
+func initRedis() {
+	if appConfig.RedisHost == "" {
+		log.Println("Redis not configured, skipping init.")
+		return
+	}
+	addr := fmt.Sprintf("%s:%d", appConfig.RedisHost, appConfig.RedisPort)
+	rdb = redis.NewClient(&redis.Options{Addr: addr, Password: appConfig.RedisPassword, DB: 0})
+	if _, err := rdb.Ping(ctx).Result(); err != nil {
+		log.Printf("Warning: Could not connect to Redis at %s: %v", addr, err)
+		rdb = nil
+	} else {
+		log.Println("Successfully connected to Redis.")
+	}
+}
+func initMySQL() {
+	dbConnections = make(map[string]*sql.DB)
+	if appConfig.MdmJdbcURL == "" {
+		log.Println("MySQL not configured, skipping init.")
+		return
+	}
+	configs := map[string]map[string]string{
+		"mdm":         {"url": appConfig.MdmJdbcURL, "username": appConfig.MdmJdbcUsername, "password": appConfig.MdmJdbcPassword},
+		"multitenant": {"url": appConfig.MtenantJdbcURL, "username": appConfig.MtenantJdbcUsername, "password": appConfig.MtenantJdbcPassword},
+	}
+	for dbName, config := range configs {
+		var dsn string
+		if temp := strings.Split(config["url"], "//"); len(temp) > 1 {
+			parts := strings.Split(temp[1], "/")
+			if len(parts) > 1 {
+				hostAndPort, dbNameAndParams := parts[0], parts[1]
+				dbNameFromURL := strings.Split(dbNameAndParams, "?")[0]
+				dsn = fmt.Sprintf("%s:%s@tcp(%s)/%s?parseTime=true", config["username"], config["password"], hostAndPort, dbNameFromURL)
+			}
+		}
+		if dsn == "" {
+			log.Printf("Warning: Could not parse DSN for database '%s'. Skipping.", dbName)
+			continue
+		}
+		db, err := sql.Open("mysql", dsn)
+		if err != nil {
+			log.Printf("Warning: Could not open connection for database '%s': %v. Skipping.", dbName, err)
+			continue
+		}
+		db.SetConnMaxLifetime(time.Minute * 3)
+		db.SetMaxOpenConns(10)
+		db.SetMaxIdleConns(5)
+		if err = db.Ping(); err != nil {
+			log.Printf("Warning: Could not connect to MySQL database '%s': %v. Skipping.", dbName, err)
+			continue
+		}
+		dbConnections[dbName] = db
+		log.Printf("Successfully connected to MySQL database: %s", dbName)
+	}
+}
+func setupProxies(basePath string) {
+	redirectHTML := `<!DOCTYPE html><html><head><title>Redirecting...</title><script>window.location.replace(window.location.pathname + "/");</script></head><body><p>Redirecting...</p></body></html>`
+
+	// RabbitMQ Proxy
+	if appConfig.RabbitMQAdminPort > 0 {
+		rabbitURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", appConfig.RabbitMQAdminPort))
+		rabbitProxy := httputil.NewSingleHostReverseProxy(rabbitURL)
+		http.Handle(basePath+"/rabbitmq/", http.StripPrefix(basePath+"/rabbitmq", rabbitProxy))
+		http.HandleFunc(basePath+"/rabbitmq", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(redirectHTML))
+		})
+		log.Printf("Enabled RabbitMQ proxy")
+	}
+
+	// MinIO Proxy
+	if appConfig.MinioURL != "" {
+		minioURL, err := url.Parse(appConfig.MinioURL)
+		if err == nil {
+			minioProxy := httputil.NewSingleHostReverseProxy(minioURL)
+			http.Handle(basePath+"/minio/", http.StripPrefix(basePath+"/minio", minioProxy))
+			http.HandleFunc(basePath+"/minio", func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte(redirectHTML))
+			})
+			log.Printf("Enabled MinIO proxy to %s", appConfig.MinioURL)
+		}
+	}
+}
+
+// --- BaseServices API Handlers ---
+func redisKeysAndTypesHandler(w http.ResponseWriter, r *http.Request) {
+	if rdb == nil {
+		http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
+		return
+	}
+	var cursor uint64
+	var allKeys []string
+	reqCtx := r.Context()
+	for {
+		var keys []string
+		var err error
+		keys, cursor, err = rdb.Scan(reqCtx, cursor, "*", 500).Result()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		allKeys = append(allKeys, keys...)
+		if cursor == 0 {
+			break
+		}
+	}
+	if len(allKeys) == 0 {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, "[]")
+		return
+	}
+	pipe := rdb.Pipeline()
+	keyTypes := make([]*redis.StatusCmd, len(allKeys))
+	for i, key := range allKeys {
+		keyTypes[i] = pipe.Type(reqCtx, key)
+	}
+	_, err := pipe.Exec(reqCtx)
+	if err != nil && err != redis.Nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	result := make([]map[string]string, len(allKeys))
+	for i, key := range allKeys {
+		result[i] = map[string]string{
+			"key":  key,
+			"type": keyTypes[i].Val(),
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+func redisValueHandler(w http.ResponseWriter, r *http.Request) {
+	if rdb == nil {
+		http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
+		return
+	}
+	key := r.URL.Query().Get("key")
+	dataType := r.URL.Query().Get("type")
+	if key == "" || dataType == "" {
+		http.Error(w, "Missing 'key' or 'type' query parameter", http.StatusBadRequest)
+		return
+	}
+	reqCtx := r.Context()
+	switch r.Method {
+	case "GET":
+		var value interface{}
+		var err error
+		switch dataType {
+		case "string":
+			value, err = rdb.Get(reqCtx, key).Result()
+		case "list":
+			value, err = rdb.LRange(reqCtx, key, 0, -1).Result()
+		case "hash":
+			value, err = rdb.HGetAll(reqCtx, key).Result()
+		default:
+			http.Error(w, "Unsupported data type for GET", http.StatusBadRequest)
+			return
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"key": key, "type": dataType, "value": value})
+	case "POST":
+		var payload map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			http.Error(w, "Invalid JSON", http.StatusBadRequest)
+			return
+		}
+		var err error
+		switch dataType {
+		case "string":
+			err = rdb.Set(reqCtx, key, payload["value"], 0).Err()
+		case "list":
+			err = rdb.LPush(reqCtx, key, payload["value"]).Err()
+		case "hash":
+			err = rdb.HSet(reqCtx, key, payload["field"], payload["value"]).Err()
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+	case "DELETE":
+		var err error
+		switch dataType {
+		case "list":
+			val := r.URL.Query().Get("value")
+			err = rdb.LRem(reqCtx, key, 1, val).Err()
+		case "hash":
+			field := r.URL.Query().Get("field")
+			err = rdb.HDel(reqCtx, key, field).Err()
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}
+}
+func redisKeyHandler(w http.ResponseWriter, r *http.Request) {
+	if rdb == nil {
+		http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
+		return
+	}
+	if r.Method != "DELETE" {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	key := r.URL.Query().Get("key")
+	if key == "" {
+		http.Error(w, "Missing 'key' query parameter", http.StatusBadRequest)
+		return
+	}
+	if err := rdb.Del(r.Context(), key).Err(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+func redisInfoHandler(w http.ResponseWriter, r *http.Request) {
+	if rdb == nil {
+		http.Error(w, "Redis not connected", http.StatusServiceUnavailable)
+		return
+	}
+	info, err := rdb.Info(r.Context(), "all").Result()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	lines := strings.Split(info, "\r\n")
+	metrics := make(map[string]string)
+	for _, line := range lines {
+		if strings.Contains(line, ":") {
+			parts := strings.SplitN(line, ":", 2)
+			key := parts[0]
+			switch key {
+			case "redis_version", "uptime_in_days", "connected_clients", "used_memory_human", "total_commands_processed", "instantaneous_ops_per_sec":
+				metrics[key] = parts[1]
+			}
+		}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(metrics)
+}
+func getDB(w http.ResponseWriter, r *http.Request, prefix string) (*sql.DB, bool) {
+	dbName := strings.TrimPrefix(r.URL.Path, prefix)
+	db, ok := dbConnections[dbName]
+	if !ok || db == nil {
+		http.Error(w, fmt.Sprintf("Database '%s' not connected or configured", dbName), http.StatusServiceUnavailable)
+		return nil, false
+	}
+	return db, true
+}
+func apiMetrics(w http.ResponseWriter, r *http.Request) {
+	db, ok := getDB(w, r, "/api/baseservices/mysql/metrics/")
+	if !ok {
+		return
+	}
+	var key string
+	var threads, maxConnections, openTables, slowQueries int
+	var questions int64
+	var uptime int64
+	var innodbBuffTotal, innodbBuffUsed int
+
+	// Scan returns error if variable not found, ignore errors for robustness
+	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Threads_connected'").Scan(&key, &threads)
+	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Questions'").Scan(&key, &questions)
+	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Uptime'").Scan(&key, &uptime)
+	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Opened_tables'").Scan(&key, &openTables)
+	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Slow_queries'").Scan(&key, &slowQueries)
+	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'").Scan(&key, &innodbBuffTotal)
+	_ = db.QueryRow("SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_data'").Scan(&key, &innodbBuffUsed)
+	_ = db.QueryRow("SHOW VARIABLES LIKE 'max_connections'").Scan(&key, &maxConnections)
+
+	now := time.Now()
+	qps := 0
+
+	// 加锁防止并发导致计算错误
+	qpsMutex.Lock()
+	if !lastQTime.IsZero() {
+		elapsed := now.Sub(lastQTime).Seconds()
+		if elapsed >= 1 && questions >= lastQuestions {
+			qps = int(float64(questions-lastQuestions) / elapsed)
+		}
+	}
+	lastQuestions = questions
+	lastQTime = now
+	qpsMutex.Unlock()
+
+	days := uptime / 86400
+	hours := (uptime % 86400) / 3600
+	minutes := (uptime % 3600) / 60
+	seconds := uptime % 60
+	uptimeStr := fmt.Sprintf("%dd %dh %dm %ds", days, hours, minutes, seconds)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode([]Metric{{
+		Time: now.Unix(), Uptime: uptime, UptimeStr: uptimeStr,
+		Threads: threads, QPS: qps, MaxConnections: maxConnections,
+		SlowQueries: slowQueries, OpenTables: openTables,
+		InnoDBBuffUsed: innodbBuffUsed, InnoDBBuffTotal: innodbBuffTotal,
+	}})
+}
+func apiTables(w http.ResponseWriter, r *http.Request) {
+	db, ok := getDB(w, r, "/api/baseservices/mysql/tables/")
+	if !ok {
+		return
+	}
+	const q = `SELECT t.table_name, IFNULL(t.table_rows,0), ROUND(IFNULL(t.data_length,0)/1024/1024), IFNULL(io.count_read,0) + IFNULL(io.count_write,0) FROM information_schema.tables t LEFT JOIN performance_schema.table_io_waits_summary_by_table io ON io.object_schema = t.table_schema AND io.object_name = t.table_name WHERE t.table_schema = DATABASE() ORDER BY 3 DESC LIMIT 10;`
+	rows, err := db.Query(q)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var out []TableStat
+	for rows.Next() {
+		var ts TableStat
+		if err := rows.Scan(&ts.Name, &ts.Rows, &ts.SizeMB, &ts.Ops); err != nil {
+			// 如果 performance_schema 没有开启或权限不足，这里可能扫描失败
+			// 简单忽略继续
+			continue
+		}
+		out = append(out, ts)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+func apiProcesslist(w http.ResponseWriter, r *http.Request) {
+	db, ok := getDB(w, r, "/api/baseservices/mysql/processlist/")
+	if !ok {
+		return
+	}
+	rows, err := db.Query("SHOW FULL PROCESSLIST")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var out []ProcessListRow
+	for rows.Next() {
+		var id, timeSec int
+		var user, host, command, state string
+		var dbName, info sql.NullString
+		if err := rows.Scan(&id, &user, &host, &dbName, &command, &timeSec, &state, &info); err != nil {
+			continue
+		}
+		out = append(out, ProcessListRow{Id: id, User: user, Host: host, DB: dbName.String, Command: command, Time: timeSec, State: state, Info: info.String})
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(out)
+}
+func apiRepl(w http.ResponseWriter, r *http.Request) {
+	db, ok := getDB(w, r, "/api/baseservices/mysql/replstatus/")
+	if !ok {
+		return
+	}
+	rows, err := db.Query("SHOW SLAVE STATUS")
+	if err != nil {
+		// 如果不是 slave，可能会报错或者空
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ReplicationStatus{Role: "master"})
+		return
+	}
+	defer rows.Close()
+	if !rows.Next() {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(ReplicationStatus{Role: "master"})
+		return
+	}
+	cols, _ := rows.Columns()
+	values := make([]sql.NullString, len(cols))
+	scanPtrs := make([]interface{}, len(cols))
+	for i := range values {
+		scanPtrs[i] = &values[i]
+	}
+	rows.Scan(scanPtrs...)
+	m := map[string]string{}
+	for i, col := range cols {
+		m[col] = values[i].String
+	}
+	secBehind := 0
+	fmt.Sscanf(m["Seconds_Behind_Master"], "%d", &secBehind)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ReplicationStatus{
+		Role:          "slave",
+		SlaveRunning:  (m["Slave_IO_Running"] == "Yes" && m["Slave_SQL_Running"] == "Yes"),
+		SecondsBehind: secBehind,
+	})
+}
+func executeSQL(w http.ResponseWriter, r *http.Request) {
+	db, ok := getDB(w, r, "/api/baseservices/mysql/execsql/")
+	if !ok {
+		return
+	}
+	type Req struct {
+		SQL string `json:"sql"`
+	}
+	var req Req
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	req.SQL = strings.TrimSpace(req.SQL)
+	if req.SQL == "" {
+		http.Error(w, "empty SQL", http.StatusBadRequest)
+		return
+	}
+	rows, err := db.Query(req.SQL)
+	if err != nil {
+		io.WriteString(w, err.Error())
+		return
+	}
+	defer rows.Close()
+	cols, _ := rows.Columns()
+	var allRows [][]string
+	for rows.Next() {
+		colsData := make([]sql.NullString, len(cols))
+		ptrs := make([]interface{}, len(cols))
+		for i := range colsData {
+			ptrs[i] = &colsData[i]
+		}
+		rows.Scan(ptrs...)
+		row := make([]string, len(cols))
+		for i, d := range colsData {
+			if d.Valid {
+				row[i] = d.String
+			} else {
+				row[i] = "NULL"
+			}
+		}
+		allRows = append(allRows, row)
+	}
+	widths := make([]int, len(cols))
+	for i, col := range cols {
+		widths[i] = len(col)
+	}
+	for _, row := range allRows {
+		for i, val := range row {
+			if len(val) > widths[i] {
+				widths[i] = len(val)
+			}
+		}
+	}
+	var sb strings.Builder
+	drawLine := func() {
+		sb.WriteString("+")
+		for _, w := range widths {
+			sb.WriteString(strings.Repeat("-", w+2) + "+")
+		}
+		sb.WriteString("\n")
+	}
+	drawLine()
+	sb.WriteString("|")
+	for i, col := range cols {
+		sb.WriteString(" " + fmt.Sprintf("%-*s", widths[i], col) + " |")
+	}
+	sb.WriteString("\n")
+	drawLine()
+	for _, row := range allRows {
+		sb.WriteString("|")
+		for i, val := range row {
+			sb.WriteString(" " + fmt.Sprintf("%-*s", widths[i], val) + " |")
+		}
+		sb.WriteString("\n")
+	}
+	drawLine()
+	io.WriteString(w, sb.String())
+}
+
+// ---------------- 业务逻辑 (Original Agent) ----------------
 
 // ISO Mount (Upload mode)
 func handleIsoMount(w http.ResponseWriter, r *http.Request) {
@@ -414,16 +1207,25 @@ func handleIsoMount(w http.ResponseWriter, r *http.Request) {
 	f, _ := w.(http.Flusher)
 	fmt.Fprintf(w, ">>> Upload ISO...\n")
 	f.Flush()
-	r.ParseMultipartForm(10 << 30)
-	file, _, _ := r.FormFile("file")
+	// Limit upload size to prevent DoS
+	r.ParseMultipartForm(10 << 30) // 10 GB
+	file, _, err := r.FormFile("file")
+	if err != nil {
+		fmt.Fprintf(w, "❌ Error getting file: %v\n", err)
+		return
+	}
 	defer file.Close()
-	dst, _ := os.Create(IsoSavePath)
+	dst, err := os.Create(IsoSavePath)
+	if err != nil {
+		fmt.Fprintf(w, "❌ Error creating file: %v\n", err)
+		return
+	}
+	defer dst.Close()
 	io.Copy(dst, file)
-	dst.Close()
 	mountAndConfigRepo(w, IsoSavePath)
 }
 
-// ISO Mount (Local mode) - NEW
+// ISO Mount (Local mode)
 func handleIsoMountLocal(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Transfer-Encoding", "chunked")
@@ -435,11 +1237,6 @@ func handleIsoMountLocal(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintf(w, "❌ File not found: %s\n", path)
 		return
 	}
-	// Copy or Link? Link is faster but mount -o loop needs file.
-	// Let's just use the path directly to mount.
-	// But wait, if we want to standardize on IsoSavePath for consistency?
-	// Let's just symlink it to IsoSavePath so existing logic works, OR just pass path.
-	// Passing path is cleaner.
 	mountAndConfigRepo(w, path)
 }
 
@@ -452,6 +1249,7 @@ func mountAndConfigRepo(w http.ResponseWriter, isoPath string) {
 	}
 
 	os.MkdirAll(IsoMountPoint, 0755)
+	// Ignore umount errors (it might not be mounted)
 	exec.Command("umount", IsoMountPoint).Run()
 
 	if out, err := exec.Command("mount", "-o", "loop", isoPath, IsoMountPoint).CombinedOutput(); err != nil {
@@ -461,6 +1259,7 @@ func mountAndConfigRepo(w http.ResponseWriter, isoPath string) {
 
 	fmt.Fprintf(w, "✅ Mount success. Configuring Repo...\n")
 	os.MkdirAll(RepoBackupDir, 0755)
+	// 使用 bash -c 处理通配符
 	exec.Command("bash", "-c", fmt.Sprintf("mv /etc/yum.repos.d/*.repo %s/", RepoBackupDir)).Run()
 
 	rc := ""
@@ -535,7 +1334,17 @@ func handleLogWS(w http.ResponseWriter, r *http.Request) {
 	cmd.Stderr = cmd.Stdout
 	out, _ := cmd.StdoutPipe()
 	cmd.Start()
-	defer func() { cmd.Process.Kill(); cmd.Wait() }()
+
+	// Ensure process is killed when websocket closes
+	done := make(chan struct{})
+	defer func() {
+		close(done)
+		if cmd.Process != nil {
+			cmd.Process.Kill()
+		}
+		cmd.Wait()
+	}()
+
 	buf := make([]byte, 4096)
 	for {
 		n, err := out.Read(buf)
@@ -599,13 +1408,12 @@ func handleCheckEnv(w http.ResponseWriter, r *http.Request) {
 			res.UemInfo.Services = append(res.UemInfo.Services, ServiceStat{Name: svc, Status: st})
 		}
 	}
-	ctx := context.Background()
 	mClient, err := minio.New(MinioEndpoint, &minio.Options{Creds: credentials.NewStaticV4(MinioUser, MinioPass, ""), Secure: false})
 	if err == nil {
-		exists, errBucket := mClient.BucketExists(ctx, MinioBucket)
+		exists, errBucket := mClient.BucketExists(context.Background(), MinioBucket)
 		if errBucket == nil && exists {
 			res.MinioInfo.BucketExists = true
-			policy, errPol := mClient.GetBucketPolicy(ctx, MinioBucket)
+			policy, errPol := mClient.GetBucketPolicy(context.Background(), MinioBucket)
 			if errPol == nil && (strings.Contains(policy, "s3:GetObject") && strings.Contains(policy, "AWS\":[\"*\"]")) {
 				res.MinioInfo.Policy = "public"
 			} else {
@@ -613,6 +1421,7 @@ func handleCheckEnv(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(res)
 }
 
@@ -621,14 +1430,13 @@ func handleFixMinio(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "POST", 400)
 		return
 	}
-	ctx := context.Background()
 	mClient, err := minio.New(MinioEndpoint, &minio.Options{Creds: credentials.NewStaticV4(MinioUser, MinioPass, ""), Secure: false})
 	if err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
 	policy := fmt.Sprintf(`{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetBucketLocation","s3:ListBucket"],"Resource":["arn:aws:s3:::%s"]},{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::%s/*"]}]}`, MinioBucket, MinioBucket)
-	if err := mClient.SetBucketPolicy(ctx, MinioBucket, policy); err != nil {
+	if err := mClient.SetBucketPolicy(context.Background(), MinioBucket, policy); err != nil {
 		http.Error(w, err.Error(), 500)
 		return
 	}
@@ -646,6 +1454,11 @@ func handleRestartService(w http.ResponseWriter, r *http.Request) {
 func handleFixSelinux(w http.ResponseWriter, r *http.Request) {
 	exec.Command("setenforce", "0").Run()
 	cfg := "/etc/selinux/config"
+	// Check file exists before reading
+	if _, err := os.Stat(cfg); err != nil {
+		w.Write([]byte("❌ Config file not found"))
+		return
+	}
 	d, _ := os.ReadFile(cfg)
 	l := strings.Split(string(d), "\n")
 	var n []string
@@ -667,12 +1480,21 @@ func handleFixFirewall(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("✅ 防火墙已关闭"))
 }
 func handleFixSsh(w http.ResponseWriter, r *http.Request) {
-	autoFixSshConfig()
+	if err := autoFixSshConfig(); err != nil {
+		http.Error(w, err.Error(), 500)
+		return
+	}
 	w.Write([]byte("✅ 修复指令已发送"))
 }
 func autoFixSshConfig() error {
 	cfg := "/etc/ssh/sshd_config"
-	d, _ := os.ReadFile(cfg)
+	if _, err := os.Stat(cfg); os.IsNotExist(err) {
+		return fmt.Errorf("sshd_config not found")
+	}
+	d, err := os.ReadFile(cfg)
+	if err != nil {
+		return err
+	}
 	lines := strings.Split(string(d), "\n")
 	hasY, hasN := false, false
 	for _, l := range lines {
@@ -707,7 +1529,10 @@ func autoFixSshConfig() error {
 	return nil
 }
 func checkSshConfig() bool {
-	f, _ := os.Open("/etc/ssh/sshd_config")
+	f, err := os.Open("/etc/ssh/sshd_config")
+	if err != nil {
+		return false
+	}
 	defer f.Close()
 	s := bufio.NewScanner(f)
 	y, n := false, false
@@ -729,17 +1554,26 @@ func checkSshConfig() bool {
 }
 func handleUpload(w http.ResponseWriter, r *http.Request) {
 	r.ParseMultipartForm(500 << 20)
-	f, h, _ := r.FormFile("file")
+	f, h, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Upload failed", 500)
+		return
+	}
 	defer f.Close()
-	dst, _ := os.Create(filepath.Join(UploadTargetDir, h.Filename))
+	dstPath := filepath.Join(UploadTargetDir, h.Filename)
+	dst, _ := os.Create(dstPath)
 	defer dst.Close()
 	io.Copy(dst, f)
-	exec.Command("tar", "-zxvf", filepath.Join(UploadTargetDir, h.Filename), "-C", UploadTargetDir).Run()
+	exec.Command("tar", "-zxvf", dstPath, "-C", UploadTargetDir).Run()
 	w.Write([]byte("OK"))
 }
 func handleUploadAny(w http.ResponseWriter, r *http.Request) {
 	r.ParseMultipartForm(500 << 20)
-	f, h, _ := r.FormFile("file")
+	f, h, err := r.FormFile("file")
+	if err != nil {
+		http.Error(w, "Upload failed", 500)
+		return
+	}
 	defer f.Close()
 	d := r.FormValue("path")
 	if d == "" {
@@ -755,7 +1589,12 @@ func handleFsList(w http.ResponseWriter, r *http.Request) {
 	if dir == "" {
 		dir = "/root"
 	}
-	es, _ := os.ReadDir(dir)
+	es, err := os.ReadDir(dir)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, "[]")
+		return
+	}
 	var fs []FileInfo
 	for _, e := range es {
 		i, _ := e.Info()
@@ -780,7 +1619,10 @@ func handleRpmInstall(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, ">>> Upload...\n")
 	f.Flush()
 	r.ParseMultipartForm(500 << 20)
-	file, h, _ := r.FormFile("file")
+	file, h, err := r.FormFile("file")
+	if err != nil {
+		return
+	}
 	defer file.Close()
 	p := filepath.Join(RpmCacheDir, h.Filename)
 	d, _ := os.Create(p)
@@ -912,7 +1754,10 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f%cB", float64(b)/float64(d), "KMGTPE"[e])
 }
 func getMemTotalKB() uint64 {
-	f, _ := os.Open("/proc/meminfo")
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
 	defer f.Close()
 	s := bufio.NewScanner(f)
 	for s.Scan() {
@@ -925,15 +1770,11 @@ func getMemTotalKB() uint64 {
 	}
 	return 0
 }
-func getDiskTotalGB(path string) float64 {
-	var s syscall.Statfs_t
-	if syscall.Statfs(path, &s) != nil {
-		return 0
-	}
-	return float64(s.Blocks) * float64(s.Bsize) / 1024 / 1024 / 1024
-}
 func getOSName() string {
-	f, _ := os.Open("/etc/os-release")
+	f, err := os.Open("/etc/os-release")
+	if err != nil {
+		return "Unknown"
+	}
 	defer f.Close()
 	s := bufio.NewScanner(f)
 	n, v := "", ""
