@@ -1328,13 +1328,44 @@ func handleFixSsh(w http.ResponseWriter, r *http.Request) {
 }
 
 func autoFixSshConfig() error {
-	d, _ := os.ReadFile("/etc/ssh/sshd_config")
-	if !strings.Contains(string(d), "AllowTcpForwarding yes") {
-		f, _ := os.OpenFile("/etc/ssh/sshd_config", os.O_APPEND|os.O_WRONLY, 0644)
-		f.WriteString("\nAllowTcpForwarding yes\n")
-		f.Close()
-		exec.Command("systemctl", "restart", "sshd").Run()
+	const cfgPath = "/etc/ssh/sshd_config"
+	contentBytes, err := os.ReadFile(cfgPath)
+	if err != nil {
+		return fmt.Errorf("read sshd_config failed: %w", err)
 	}
+	content := string(contentBytes)
+
+	updated := false
+
+	// 1. 如果发现 "#AllowTcpForwarding yes"，改为 "AllowTcpForwarding yes"
+	if strings.Contains(content, "#AllowTcpForwarding yes") {
+		content = strings.ReplaceAll(content, "#AllowTcpForwarding yes", "AllowTcpForwarding yes")
+		updated = true
+	}
+
+	// 2. 如果既没有 AllowTcpForwarding yes，也没有 AllowTcpForwarding no，则追加
+	if !strings.Contains(content, "AllowTcpForwarding yes") &&
+		!strings.Contains(content, "AllowTcpForwarding no") {
+		content += "\nAllowTcpForwarding yes\n"
+		updated = true
+	}
+
+	// 没有变动，不需要写回与重启
+	if !updated {
+		return nil
+	}
+
+	// 3. 写回配置文件
+	err = os.WriteFile(cfgPath, []byte(content), 0644)
+	if err != nil {
+		return fmt.Errorf("write sshd_config failed: %w", err)
+	}
+
+	// 4. 重启 sshd
+	if err := exec.Command("systemctl", "restart", "sshd").Run(); err != nil {
+		return fmt.Errorf("restart sshd failed: %w", err)
+	}
+
 	return nil
 }
 
