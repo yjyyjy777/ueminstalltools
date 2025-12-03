@@ -119,6 +119,12 @@ type ReplicationStatus struct {
 	SecondsBehind int    `json:"seconds_behind"`
 }
 
+type SqlResult struct {
+	Columns []string   `json:"columns"`
+	Rows    [][]string `json:"rows"`
+	Error   string     `json:"error,omitempty"`
+}
+
 var appConfig Config
 var (
 	rdb           *redis.Client
@@ -140,7 +146,6 @@ const htmlPage = `
     <title>综合运维平台</title>
     <script>
         // 【关键】强制确保 URL 以 / 结尾
-        // 解决 Nginx 反代子路径 (如 /gogogo) 时相对路径加载错误的问题
         if (!window.location.pathname.endsWith('/') && !window.location.pathname.endsWith('.html')) {
             var newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "/" + window.location.search;
             window.history.replaceState(null, null, newUrl);
@@ -153,25 +158,16 @@ const htmlPage = `
     <style>
         /* 全局布局：Flex Column */
         body { font-family: 'Segoe UI', sans-serif; background: #2c3e50; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-        
-        /* 顶部导航：固定高度 */
         .navbar { background: #34495e; padding: 0 20px; height: 50px; display: flex; align-items: center; border-bottom: 1px solid #1abc9c; flex-shrink: 0; }
         .brand { color: #fff; font-weight: bold; font-size: 18px; margin-right: 20px; }
         .tab-btn { background: transparent; border: none; color: #bdc3c7; font-size: 13px; padding: 0 10px; height: 100%; cursor: pointer; transition: 0.3s; border-bottom: 3px solid transparent; }
         .tab-btn:hover { color: white; background: rgba(255,255,255,0.05); }
         .tab-btn.active { color: #1abc9c; border-bottom: 3px solid #1abc9c; background: rgba(26, 188, 156, 0.1); }
-        
-        /* 主内容区域：占据剩余空间，禁止 Body 滚动，由子 Panel 处理滚动 */
         .content { flex: 1; position: relative; background: #ecf0f1; overflow: hidden; display: flex; flex-direction: column; }
-        
-        /* 面板通用样式：默认隐藏，激活显示 */
         .panel { display: none; width: 100%; height: 100%; padding: 20px; box-sizing: border-box; overflow-y: auto; }
         .panel.active { display: block; }
-        
-        /* 特殊处理基础服务面板：使用 Flex 布局以支持全屏 iframe */
         #panel-baseservices { padding: 0; display: none; flex-direction: column; height: 100%; overflow: hidden; }
         #panel-baseservices.active { display: flex; }
-        
         .container-box { padding: 20px; max-width: 1200px; margin: 0 auto; width: 100%; box-sizing: border-box; }
         .card { background: white; padding: 15px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 15px; display: flex; flex-direction: column; }
         h3 { margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; color: #2c3e50; display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
@@ -238,6 +234,13 @@ const htmlPage = `
        
        /* iframe 容器：flex: 1 撑满高度，无边框 */
        .iframe-container { flex: 1; width: 100%; height: 100%; border: none; display: block; }
+
+       /* SQL Result Table */
+       .sql-table-container { overflow: auto; max-height: 400px; border: 1px solid #ddd; margin-top: 10px; }
+       .sql-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: Consolas, monospace; white-space: nowrap; }
+       .sql-table th { background: #f8f9fa; position: sticky; top: 0; border-bottom: 2px solid #ddd; padding: 8px; text-align: left; color: #333; }
+       .sql-table td { border-bottom: 1px solid #eee; padding: 6px 8px; color: #444; }
+       .sql-table tr:hover { background-color: #f1f1f1; }
     </style>
 </head>
 <body>
@@ -253,6 +256,12 @@ const htmlPage = `
 </div>
 <div class="content">
     <div id="panel-check" class="panel active">
+        <div class="card" style="margin-bottom: 20px;">
+            <h3>📈 系统实时监控 (3秒刷新)</h3>
+            <div style="height: 250px; position: relative;">
+                <canvas id="sysChart"></canvas>
+            </div>
+        </div>
         <div class="grid-2">
             <div>
                 <div class="card"><h3>🖥️ 基础环境 <button onclick="runCheck()" class="btn-sm"><i class="fas fa-sync"></i> 刷新</button></h3><table id="baseTable"><tbody><tr><td>加载中...</td></tr></tbody></table></div>
@@ -326,7 +335,7 @@ const htmlPage = `
                    <h3>执行SQL</h3>
                    <textarea id="mysql-sqlInput" rows="5" style="width:100%; font-family:monospace;"></textarea>
                    <button onclick="mysql.execSQL()" class="btn-green" style="margin-top:10px;">执行</button>
-                   <pre id="mysql-sqlResult" class="term-box" style="margin-top:10px;"></pre>
+                   <div id="mysql-sqlResult" class="sql-table-container"></div>
                 </div>
              </div>
            </div>
@@ -348,9 +357,9 @@ const htmlPage = `
                 <table class="about-table">
                     <tbody>
                         <tr><td style="width: 100px;"><strong>作者</strong></td><td>王凯</td></tr>
-                        <tr><td><strong>版本</strong></td><td>4.0 (UTF-8 Log Fix & Nginx Proxy Rewrite)</td></tr>
+                        <tr><td><strong>版本</strong></td><td>4.5 (Complete Fix)</td></tr>
                         <tr><td><strong>更新日期</strong></td><td>2024-07-26</td></tr>
-                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端</li><li>实时查看多种 UEM 服务日志 (Auto UTF-8 Fix)</li><li>基础服务(Redis/MySQL/RabbitMQ/MinIO)监控与管理</li></ul></td></tr>
+                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li><strong>新功能：实时系统资源（内存/负载）监控图表</strong></li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端</li><li>实时查看多种 UEM 服务日志</li><li>基础服务(Redis/MySQL/RabbitMQ/MinIO)监控与管理</li></ul></td></tr>
                     </tbody>
                 </table>
             </div>
@@ -373,7 +382,85 @@ const htmlPage = `
     const UPLOAD_URL = "upload";
     
     let deployTerm, sysTerm, deploySocket, sysSocket, deployFit, sysFit, logSocket, currentPath = "/root";
-    window.onload = function() { runCheck(); fmLoadPath("/root"); }
+    let sysChart; 
+    let checkInterval;
+
+    window.onload = function() { 
+        initSysChart();
+        runCheck(); 
+        fmLoadPath("/root");
+        // Start polling check
+        startCheckPolling();
+    }
+
+    function startCheckPolling() {
+        if(checkInterval) clearInterval(checkInterval);
+        checkInterval = setInterval(() => {
+            // Only poll if on check panel
+            if(document.getElementById('panel-check').classList.contains('active')) {
+                runCheck();
+            }
+        }, 3000);
+    }
+
+    function initSysChart() {
+        const ctx = document.getElementById('sysChart').getContext('2d');
+        sysChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: '内存使用率 (%)',
+                        data: [],
+                        borderColor: '#e74c3c',
+                        backgroundColor: 'rgba(231, 76, 60, 0.1)',
+                        fill: true,
+                        tension: 0.3
+                    },
+                    {
+                        label: '系统负载 (1min)',
+                        data: [],
+                        borderColor: '#2980b9',
+                        backgroundColor: 'rgba(41, 128, 185, 0.1)',
+                        fill: true,
+                        tension: 0.3,
+                        yAxisID: 'y1'
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                animation: false,
+                interaction: {
+                    mode: 'index',
+                    intersect: false,
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        title: { display: true, text: 'Memory %' }
+                    },
+                    y1: {
+                        type: 'linear',
+                        display: true,
+                        position: 'right',
+                        beginAtZero: true,
+                        title: { display: true, text: 'Load Avg' },
+                        grid: {
+                            drawOnChartArea: false, 
+                        },
+                    },
+                    x: {
+                        ticks: { display: false } // Hide time labels for cleaner look
+                    }
+                }
+            }
+        });
+    }
+
     function switchTab(id) {
         document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
         document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -390,11 +477,7 @@ const htmlPage = `
           document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
           document.getElementById('panel-baseservices').classList.add('active');
        }
-       // Logic to toggle sub-panels inside panel-baseservices
-       const parent = document.getElementById('panel-baseservices');
-       parent.querySelectorAll('.sub-panel').forEach(p => p.classList.remove('active'));
-       parent.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active'));
-       
+
        if(group) { // for mysql internal tabs
            const p = event.target.closest('.card');
            p.querySelectorAll('.'+group).forEach(x=>x.style.display='none');
@@ -402,10 +485,14 @@ const htmlPage = `
            document.getElementById(id).style.display='block';
            event.target.classList.add('active');
            return;
+       } else {
+           // Logic to toggle sub-panels inside panel-baseservices
+           const parent = document.getElementById('panel-baseservices');
+           parent.querySelectorAll('.sub-panel').forEach(p => p.classList.remove('active'));
+           parent.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active'));
+           document.getElementById(id).classList.add('active');
+           event.target.classList.add('active');
        }
-
-       document.getElementById(id).classList.add('active');
-       event.target.classList.add('active');
 
        // Lazy load iframes
        if (id === 'bs-rabbitmq') {
@@ -470,7 +557,23 @@ const htmlPage = `
     function clearLog(){ document.getElementById('logContent').innerText=""; }
     async function runCheck() {
         try {
+            // 关键修复：使用 API_BASE 动态拼接
             const resp = await fetch(API_BASE + 'check'); const data = await resp.json();
+            
+            // --- Chart Update Logic ---
+            if(sysChart && data.sys_info.mem_usage !== undefined) {
+                const now = new Date().toLocaleTimeString();
+                if(sysChart.data.labels.length > 20) {
+                    sysChart.data.labels.shift();
+                    sysChart.data.datasets.forEach(d => d.data.shift());
+                }
+                sysChart.data.labels.push(now);
+                sysChart.data.datasets[0].data.push(data.sys_info.mem_usage);
+                sysChart.data.datasets[1].data.push(data.sys_info.load_avg);
+                sysChart.update();
+            }
+            // --------------------------
+
             let baseHtml = '';
             baseHtml += row('CPU', data.sys_info.cpu_cores + ' 核', data.sys_info.cpu_pass);
             baseHtml += row('内存', data.sys_info.mem_total, data.sys_info.mem_pass);
@@ -512,6 +615,7 @@ const htmlPage = `
     async function fixSsh() { if(confirm("Fix SSH?")) fetch(API_BASE+'fix_ssh',{method:'POST'}).then(r=>r.text()).then(alert); }
     async function fmLoadPath(p) {
         currentPath=p; document.getElementById('fmPath').innerText=p;
+        // 关键修复：使用 API_BASE 动态拼接
         const r=await fetch(API_BASE+'fs/list?path='+encodeURIComponent(p)); const fs=await r.json();
         let h=''; fs.sort((a,b)=>(a.is_dir===b.is_dir)?0:a.is_dir?-1:1);
         fs.forEach(f=>{
@@ -538,7 +642,8 @@ const htmlPage = `
        init: function() { if(this.initialized) return; this.fetchInfo(); this.fetchAllKeys(); this.initialized = true; },
        fetchInfo: async function() {
           try {
-             const res = await fetch('/api/baseservices/redis/info'); if (!res.ok) throw new Error('Failed to fetch info');
+             // 关键修复：使用 API_BASE 动态拼接
+             const res = await fetch(API_BASE + 'baseservices/redis/info'); if (!res.ok) throw new Error('Failed to fetch info');
              const info = await res.json();
              const metrics = {'redis_version': 'Version', 'uptime_in_days': 'Uptime (Days)', 'connected_clients': 'Clients', 'used_memory_human': 'Memory', 'total_commands_processed': 'Commands', 'instantaneous_ops_per_sec': 'Ops/Sec'};
              const grid = document.getElementById('redis-info-grid'); grid.innerHTML = '';
@@ -549,7 +654,8 @@ const htmlPage = `
        },
        fetchAllKeys: async function() {
           try {
-             const res = await fetch('/api/baseservices/redis/keys'); if (!res.ok) throw new Error('Failed to fetch keys');
+             // 关键修复：使用 API_BASE 动态拼接
+             const res = await fetch(API_BASE + 'baseservices/redis/keys'); if (!res.ok) throw new Error('Failed to fetch keys');
              this.allKeys = await res.json() || []; this.allKeys.sort((a, b) => a.key.localeCompare(b.key));
              this.renderTable();
           } catch (e) { document.getElementById('redis-keys-table-container').innerHTML = '<p class="fail">Failed to load keys.</p>'; }
@@ -566,14 +672,16 @@ const htmlPage = `
        },
        deleteKey: async function(key) {
           if (!confirm('确认删除: ' + key + '?')) return;
-          await fetch('/api/baseservices/redis/key?key=' + encodeURIComponent(key), { method: 'DELETE' });
+          // 关键修复：使用 API_BASE 动态拼接
+          await fetch(API_BASE + 'baseservices/redis/key?key=' + encodeURIComponent(key), { method: 'DELETE' });
           this.fetchAllKeys();
        },
        viewEditKey: async function(key, type) {
           const modalTitle = document.getElementById('modal-title'); const modalBody = document.getElementById('modal-body');
           modalTitle.textContent = 'Editing ' + type + ': ' + key; modalBody.innerHTML = '<p>Loading...</p>';
           document.getElementById('modal-backdrop').style.display = 'block'; document.getElementById('modal').style.display = 'block';
-          const res = await fetch('/api/baseservices/redis/value?type=' + type + '&key=' + encodeURIComponent(key));
+          // 关键修复：使用 API_BASE 动态拼接
+          const res = await fetch(API_BASE + 'baseservices/redis/value?type=' + type + '&key=' + encodeURIComponent(key));
           const data = await res.json();
           this.renderModalContent(data);
        },
@@ -598,25 +706,26 @@ const htmlPage = `
        },
        saveStringValue: async function(key) {
           const value = document.getElementById('stringValue').value;
-          await fetch('/api/baseservices/redis/value?type=string&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
+          // 关键修复：使用 API_BASE 动态拼接
+          await fetch(API_BASE + 'baseservices/redis/value?type=string&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
           this.hideModal();
        },
        addListItem: async function(key) {
           const value = document.getElementById('newListItem').value; if (!value) return;
-          await fetch('/api/baseservices/redis/value?type=list&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
+          await fetch(API_BASE + 'baseservices/redis/value?type=list&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
           this.viewEditKey(key, 'list');
        },
        deleteListItem: async function(key, value) {
-          await fetch('/api/baseservices/redis/value?type=list&key=' + encodeURIComponent(key) + '&value=' + encodeURIComponent(value), { method: 'DELETE' });
+          await fetch(API_BASE + 'baseservices/redis/value?type=list&key=' + encodeURIComponent(key) + '&value=' + encodeURIComponent(value), { method: 'DELETE' });
           this.viewEditKey(key, 'list');
        },
        addHashField: async function(key) {
           const field = document.getElementById('newHashField').value; const value = document.getElementById('newHashValue').value; if (!field) return;
-          await fetch('/api/baseservices/redis/value?type=hash&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field, value }) });
+          await fetch(API_BASE + 'baseservices/redis/value?type=hash&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field, value }) });
           this.viewEditKey(key, 'hash');
        },
        deleteHashField: async function(key, field) {
-          await fetch('/api/baseservices/redis/value?type=hash&key=' + encodeURIComponent(key) + '&field=' + encodeURIComponent(field), { method: 'DELETE' });
+          await fetch(API_BASE + 'baseservices/redis/value?type=hash&key=' + encodeURIComponent(key) + '&field=' + encodeURIComponent(field), { method: 'DELETE' });
           this.viewEditKey(key, 'hash');
        },
        hideModal: function() { document.getElementById('modal-backdrop').style.display = 'none'; document.getElementById('modal').style.display = 'none'; }
@@ -643,7 +752,8 @@ const htmlPage = `
        },
        loadMetrics: async function() {
           try {
-             const res = await fetch('/api/baseservices/mysql/metrics/' + this.currentDB); const arr = await res.json(); if (!arr || arr.length === 0) return;
+             // 关键修复：使用 API_BASE 动态拼接
+             const res = await fetch(API_BASE + 'baseservices/mysql/metrics/' + this.currentDB); const arr = await res.json(); if (!arr || arr.length === 0) return;
              const m = arr[0];
              document.getElementById('mysql-threads').innerText = m.threads; document.getElementById('mysql-qps').innerText = m.qps;
              document.getElementById('mysql-connections').innerText = m.max_connections; document.getElementById('mysql-uptime').innerText = m.uptime_str;
@@ -655,14 +765,16 @@ const htmlPage = `
        },
        loadTables: async function() {
           try {
-             const res = await fetch('/api/baseservices/mysql/tables/' + this.currentDB); const data = await res.json(); if (!Array.isArray(data)) return;
+             // 关键修复：使用 API_BASE 动态拼接
+             const res = await fetch(API_BASE + 'baseservices/mysql/tables/' + this.currentDB); const data = await res.json(); if (!Array.isArray(data)) return;
              this.charts.size.data.labels = data.map(d => d.name); this.charts.size.data.datasets[0].data = data.map(d => d.size_mb); this.charts.size.update();
              this.charts.ops.data.labels = data.map(d => d.name); this.charts.ops.data.datasets[0].data = data.map(d => d.ops); this.charts.ops.update();
           } catch (e) { console.error('mysql.loadTables', e); }
        },
        loadProcesslist: async function() {
           try {
-             const res = await fetch('/api/baseservices/mysql/processlist/' + this.currentDB); const data = await res.json();
+             // 关键修复：使用 API_BASE 动态拼接
+             const res = await fetch(API_BASE + 'baseservices/mysql/processlist/' + this.currentDB); const data = await res.json();
              const filter = document.getElementById('mysql-slowFilter').value.toLowerCase();
              const tbody = document.querySelector('#mysql-slowQueryTable tbody'); tbody.innerHTML = '';
              (data || []).forEach(q => {
@@ -673,7 +785,8 @@ const htmlPage = `
        },
        loadRepl: async function() {
           try {
-             const res = await fetch('/api/baseservices/mysql/replstatus/' + this.currentDB); const r = await res.json();
+             // 关键修复：使用 API_BASE 动态拼接
+             const res = await fetch(API_BASE + 'baseservices/mysql/replstatus/' + this.currentDB); const r = await res.json();
              document.getElementById('mysql-replStatus').innerHTML = 'Role: ' + r.role + ' | Slave Running: <span class="' + (r.slave_running ? 'pass' : 'fail') + '">' + r.slave_running + '</span> | Delay(s): ' + r.seconds_behind;
              if (this.charts.repl.data.labels.length > 20) { this.charts.repl.data.labels.shift(); this.charts.repl.data.datasets[0].data.shift(); }
              this.charts.repl.data.labels.push(new Date().toLocaleTimeString()); this.charts.repl.data.datasets[0].data.push(r.seconds_behind || 0);
@@ -682,8 +795,38 @@ const htmlPage = `
        },
        execSQL: async function() {
           const sql = document.getElementById('mysql-sqlInput').value.trim(); if (!sql) return;
-          const res = await fetch('/api/baseservices/mysql/execsql/' + this.currentDB, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
-          document.getElementById('mysql-sqlResult').innerText = await res.text();
+          // 关键修复：使用 API_BASE 动态拼接，且处理 JSON 结果生成表格
+          const res = await fetch(API_BASE + 'baseservices/mysql/execsql/' + this.currentDB, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) });
+          const result = await res.json();
+          const div = document.getElementById('mysql-sqlResult');
+          
+          if(result.error) {
+              div.innerHTML = '<div style="color:red; padding:10px;">Error: ' + escapeHtml(result.error) + '</div>';
+              return;
+          }
+          
+          if(!result.columns || result.columns.length === 0) {
+              div.innerHTML = '<div style="padding:10px; color:#666;">Query executed successfully. No rows returned.</div>';
+              return;
+          }
+
+          let tableHtml = '<table class="sql-table"><thead><tr>';
+          result.columns.forEach(col => {
+              tableHtml += '<th>' + escapeHtml(col) + '</th>';
+          });
+          tableHtml += '</tr></thead><tbody>';
+          
+          if(result.rows) {
+              result.rows.forEach(row => {
+                 tableHtml += '<tr>';
+                 row.forEach(cell => {
+                     tableHtml += '<td>' + escapeHtml(cell) + '</td>';
+                 });
+                 tableHtml += '</tr>';
+              });
+          }
+          tableHtml += '</tbody></table>';
+          div.innerHTML = tableHtml;
        }
     };
 </script>
@@ -712,6 +855,9 @@ type SysInfo struct {
 	DiskDetail string     `json:"disk_detail"`
 	Ulimit     string     `json:"ulimit"`
 	UlimitPass bool       `json:"ulimit_pass"`
+	// 新增监控字段
+	MemUsage float64 `json:"mem_usage"`
+	LoadAvg  float64 `json:"load_avg"`
 }
 type SecInfo struct {
 	SELinux     string `json:"selinux"`
@@ -1318,11 +1464,14 @@ func executeSQL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows, err := db.Query(req.SQL)
+	// If error, return JSON with error field
 	if err != nil {
-		io.WriteString(w, err.Error())
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(SqlResult{Error: err.Error()})
 		return
 	}
 	defer rows.Close()
+
 	cols, _ := rows.Columns()
 	var allRows [][]string
 	for rows.Next() {
@@ -1342,41 +1491,12 @@ func executeSQL(w http.ResponseWriter, r *http.Request) {
 		}
 		allRows = append(allRows, row)
 	}
-	widths := make([]int, len(cols))
-	for i, col := range cols {
-		widths[i] = len(col)
-	}
-	for _, row := range allRows {
-		for i, val := range row {
-			if len(val) > widths[i] {
-				widths[i] = len(val)
-			}
-		}
-	}
-	var sb strings.Builder
-	drawLine := func() {
-		sb.WriteString("+")
-		for _, w := range widths {
-			sb.WriteString(strings.Repeat("-", w+2) + "+")
-		}
-		sb.WriteString("\n")
-	}
-	drawLine()
-	sb.WriteString("|")
-	for i, col := range cols {
-		sb.WriteString(" " + fmt.Sprintf("%-*s", widths[i], col) + " |")
-	}
-	sb.WriteString("\n")
-	drawLine()
-	for _, row := range allRows {
-		sb.WriteString("|")
-		for i, val := range row {
-			sb.WriteString(" " + fmt.Sprintf("%-*s", widths[i], val) + " |")
-		}
-		sb.WriteString("\n")
-	}
-	drawLine()
-	io.WriteString(w, sb.String())
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(SqlResult{
+		Columns: cols,
+		Rows:    allRows,
+	})
 }
 
 // ---------------- 业务逻辑 (Original Agent) ----------------
@@ -1552,6 +1672,19 @@ func handleCheckEnv(w http.ResponseWriter, r *http.Request) {
 	res.SysInfo.OsName = getOSName()
 	lo := strings.ToLower(res.SysInfo.OsName)
 	res.SysInfo.OsPass = (strings.Contains(lo, "kylin") && strings.Contains(lo, "v10")) || (strings.Contains(lo, "rocky") && strings.Contains(lo, "9"))
+
+	// Metrics: Mem Usage
+	res.SysInfo.MemUsage = 0
+	if mkb > 0 {
+		avail := getMemAvailableKB()
+		if avail > 0 {
+			res.SysInfo.MemUsage = float64(mkb-avail) / float64(mkb) * 100
+		}
+	}
+
+	// Metrics: Load Avg (Linux only)
+	res.SysInfo.LoadAvg = getLoadAvg()
+
 	out, _ := exec.Command("bash", "-c", "ulimit -n").Output()
 	res.SysInfo.Ulimit = strings.TrimSpace(string(out))
 	res.SysInfo.UlimitPass = (res.SysInfo.Ulimit != "1024")
@@ -1951,6 +2084,39 @@ func getMemTotalKB() uint64 {
 			fmt.Sscanf(strings.Fields(l)[1], "%d", &k)
 			return k
 		}
+	}
+	return 0
+}
+
+// Helper: Get available memory for chart
+func getMemAvailableKB() uint64 {
+	f, err := os.Open("/proc/meminfo")
+	if err != nil {
+		return 0
+	}
+	defer f.Close()
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		l := s.Text()
+		if strings.HasPrefix(l, "MemAvailable:") {
+			var k uint64
+			fmt.Sscanf(strings.Fields(l)[1], "%d", &k)
+			return k
+		}
+	}
+	return 0
+}
+
+// Helper: Get load avg
+func getLoadAvg() float64 {
+	d, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return 0
+	}
+	parts := strings.Fields(string(d))
+	if len(parts) > 0 {
+		v, _ := strconv.ParseFloat(parts[0], 64)
+		return v
 	}
 	return 0
 }
