@@ -48,7 +48,7 @@ func main() {
 
 	// --- 2. SSH 输入 ---
 	ipEntry := widget.NewEntry()
-	ipEntry.SetPlaceHolder("192.168.x.x")
+	ipEntry.SetPlaceHolder("172.16.10.151")
 	sshPortEntry := widget.NewEntry()
 	sshPortEntry.SetText("22")
 	userEntry := widget.NewEntry()
@@ -147,6 +147,7 @@ func main() {
 				btnStop.Enable()
 				btnBrowser.Enable()
 				logUI(fmt.Sprintf("✅ 运行中 | 本地: %s <-> 远端: %s", lPort, rPort))
+				openBrowser("http://localhost:" + lPort)
 			}
 		}()
 	})

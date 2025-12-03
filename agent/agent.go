@@ -138,392 +138,6 @@ var (
 	netMutex      sync.Mutex
 )
 
-// ================= 2. 前端页面 =================
-const htmlPage = `
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <title>综合运维平台</title>
-    <script>
-        if (!window.location.pathname.endsWith('/') && !window.location.pathname.endsWith('.html')) {
-            var newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "/" + window.location.search;
-            window.history.replaceState(null, null, newUrl);
-            window.location.reload(); 
-        }
-    </script>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    <style>
-        body { font-family: 'Segoe UI', sans-serif; background: #2c3e50; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-        .navbar { background: #34495e; padding: 0 20px; height: 50px; display: flex; align-items: center; border-bottom: 1px solid #1abc9c; flex-shrink: 0; }
-        .brand { color: #fff; font-weight: bold; font-size: 18px; margin-right: 20px; }
-        .tab-btn { background: transparent; border: none; color: #bdc3c7; font-size: 13px; padding: 0 10px; height: 100%; cursor: pointer; transition: 0.3s; border-bottom: 3px solid transparent; }
-        .tab-btn:hover { color: white; background: rgba(255,255,255,0.05); }
-        .tab-btn.active { color: #1abc9c; border-bottom: 3px solid #1abc9c; background: rgba(26, 188, 156, 0.1); }
-        .content { flex: 1; position: relative; background: #ecf0f1; overflow: hidden; display: flex; flex-direction: column; }
-        .panel { display: none; width: 100%; height: 100%; padding: 20px; box-sizing: border-box; overflow-y: auto; }
-        .panel.active { display: block; }
-        #panel-baseservices { padding: 0; display: none; flex-direction: column; height: 100%; overflow: hidden; }
-        #panel-baseservices.active { display: flex; }
-        .container-box { padding: 20px; max-width: 1200px; margin: 0 auto; width: 100%; box-sizing: border-box; }
-        .card { background: white; padding: 15px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 15px; display: flex; flex-direction: column; }
-        h3 { margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; color: #2c3e50; display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
-        .term-box { flex: 1; background: #1e1e1e; padding: 10px; overflow-y: auto; border-radius: 6px; color: #0f0; font-family: Consolas, monospace; font-size: 13px; white-space: pre-wrap; border: 1px solid #333; }
-        .full-term { width: 100%; height: 100%; background: #000; padding: 10px; box-sizing: border-box; }
-        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
-        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
-        th { background-color: #f8f9fa; color: #666; position: sticky; top: 0; }
-        .pass { color: #27ae60; font-weight: bold; }
-        .fail { color: #c0392b; font-weight: bold; }
-        .warn { color: #f39c12; font-weight: bold; }
-        .progress-bg { width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 16px; overflow: hidden; position: relative; }
-        .progress-bar { height: 100%; text-align: center; line-height: 16px; color: white; font-size: 10px; transition: width 0.5s; }
-        .bg-green { background-color: #27ae60; } .bg-orange { background-color: #f39c12; } .bg-red { background-color: #c0392b; }
-        .disk-text { font-size: 12px; color: #666; margin-top: 2px; display: flex; justify-content: space-between; }
-        .fm-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
-        .fm-path { flex: 1; padding: 5px; border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9; font-family: monospace; }
-        .fm-list { flex: 1; overflow-y: auto; }
-        .icon-dir { color: #f39c12; margin-right: 5px; } .icon-file { color: #95a5a6; margin-right: 5px; }
-        .link-dir { color: #2980b9; cursor: pointer; text-decoration: none; font-weight: bold; } .link-dir:hover { text-decoration: underline; }
-        .log-layout { display: flex; height: 100%; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; background: white; }
-        .log-sidebar { width: 240px; background: #f8f9fa; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
-        .log-sidebar-header { padding: 10px; background: #e9ecef; font-weight: bold; font-size: 14px; border-bottom: 1px solid #ddd; }
-        .log-list { flex: 1; overflow-y: auto; list-style: none; padding: 0; margin: 0; }
-        .log-item { padding: 8px 12px; cursor: pointer; font-size: 13px; color: #333; border-bottom: 1px solid #f1f1f1; transition: 0.2s; display: flex; justify-content: space-between; align-items: center; }
-        .log-item:hover { background: #e2e6ea; } .log-item.active { background: #3498db; color: white; border-left: 4px solid #2980b9; }
-        .log-viewer-container { flex: 1; display: flex; flex-direction: column; background: #1e1e1e; }
-        .log-viewer-header { padding: 5px 10px; background: #2c3e50; color: #ecf0f1; font-size: 12px; display: flex; justify-content: space-between; align-items: center; }
-        .log-content { flex: 1; overflow-y: auto; padding: 10px; font-family: 'Consolas', monospace; font-size: 12px; color: #dcdcdc; white-space: pre-wrap; word-break: break-all; }
-        button { background: #2980b9; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: 0.2s; }
-        button:hover { background: #3498db; } button:disabled { background: #95a5a6; cursor: not-allowed; }
-        .btn-sm { padding: 4px 8px; font-size: 12px; } 
-        .btn-fix { background: #e67e22; } .btn-fix:hover { background: #d35400; }
-        .btn-green { background: #27ae60; } .btn-green:hover { background: #219150; }
-        .btn-orange { background: #e67e22; } .btn-orange:hover { background: #d35400; }
-        .btn-red { background: #e74c3c; } .btn-red:hover { background: #c0392b; }
-        .btn-restart { background: #e74c3c; } .btn-restart:hover { background: #c0392b; }
-        .btn-dl-log { background: transparent; border: 1px solid #ccc; color: #666; padding: 2px 6px; border-radius: 3px; font-size: 11px; cursor: pointer; }
-        .btn-dl-log:hover { background: #27ae60; color: white; border-color: #27ae60; }
-        input[type="file"], input[type="text"], textarea, select { border: 1px solid #ccc; padding: 5px; background: white; font-size: 13px; border-radius: 4px; }
-        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
-        .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
-        .about-table td { padding: 10px; }
-        .about-table tr:not(:last-child) td { border-bottom: 1px solid #f0f0f0; }
-       .bs-header { padding: 10px 20px; background: #e9ecef; display: flex; gap: 5px; border-bottom: 1px solid #ddd; flex-shrink: 0; }
-       .sub-tab-btn { background: #fff; color: #666; border: 1px solid #ddd; padding: 6px 14px; cursor: pointer; border-radius: 4px; font-size: 13px; }
-       .sub-tab-btn:hover { background: #f8f9fa; }
-       .sub-tab-btn.active { background: #2980b9; color: white; border-color: #2980b9; }
-       .sub-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; background: #fff; width: 100%; height: 100%; }
-       .sub-panel.active { display: flex; }
-       .modal-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 100; display: none; }
-        .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 101; width: 90%; max-width: 700px; display: none; max-height: 80vh; overflow-y: auto; }
-        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #dee2e6; padding-bottom: 10px; margin-bottom: 20px; }
-        .modal-title { margin: 0; font-size: 1.25rem; }
-        .modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; }
-        .modal-body { margin-bottom: 20px; }
-        .modal-footer { border-top: 1px solid #dee2e6; padding-top: 15px; margin-top: 20px; text-align: right; }
-       .list-item, .hash-item { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #e9ecef; }
-       .iframe-container { flex: 1; width: 100%; height: 100%; border: none; display: block; }
-       .sql-table-container { overflow: auto; max-height: 400px; border: 1px solid #ddd; margin-top: 10px; }
-       .sql-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: Consolas, monospace; white-space: nowrap; }
-       .sql-table th { background: #f8f9fa; position: sticky; top: 0; border-bottom: 2px solid #ddd; padding: 8px; text-align: left; color: #333; }
-       .sql-table td { border-bottom: 1px solid #eee; padding: 6px 8px; color: #444; }
-       .sql-table tr:hover { background-color: #f1f1f1; }
-    </style>
-</head>
-<body>
-<div class="navbar">
-    <button class="tab-btn active" onclick="switchTab('check')">🔍 操作系统</button>
-    <button class="tab-btn" onclick="switchTab('deps')">🔧 环境依赖</button>
-    <button class="tab-btn" onclick="switchTab('deploy')">📦 部署/更新</button>
-    <button class="tab-btn" onclick="switchTab('files')">📂 文件管理</button>
-    <button class="tab-btn" onclick="switchTab('terminal')">💻 终端</button>
-    <button class="tab-btn" onclick="switchTab('logs')">📜 日志查看</button>
-    <button class="tab-btn" onclick="switchTab('baseservices')">⚙️ 基础服务</button>
-    <button class="tab-btn" onclick="switchTab('about')">ℹ️ 关于</button>
-</div>
-<div class="content">
-    <div id="panel-check" class="panel active">
-        <div class="grid-2">
-            <div class="card">
-                <h3>📈 系统资源 (3秒刷新)</h3>
-                <div style="height: 200px; position: relative;">
-                    <canvas id="sysChart"></canvas>
-                </div>
-            </div>
-            <div class="card">
-                <h3>🌐 网络流量 (KB/s)</h3>
-                <div style="height: 200px; position: relative;">
-                    <canvas id="netChart"></canvas>
-                </div>
-            </div>
-        </div>
-        <br>
-        <div class="grid-2">
-            <div>
-                <div class="card"><h3>🖥️ 基础环境 <button onclick="runCheck()" class="btn-sm"><i class="fas fa-sync"></i> 刷新</button></h3><table id="baseTable"><tbody><tr><td>加载中...</td></tr></tbody></table></div>
-                <div class="card"><h3>💾 磁盘空间概览</h3><div id="diskList" style="margin-top:10px;">加载中...</div></div>
-                <div class="card"><h3>🛡️ 安全与网络</h3><table id="secTable"><tbody><tr><td>加载中...</td></tr></tbody></table></div>
-            </div>
-            <div>
-                <div class="card"><h3>🚀 UEM 服务监控</h3><div id="uemStatusBox"><p>检测 UEM 安装状态...</p></div></div>
-                <div class="card"><h3>🗄️ MinIO 检测</h3><table id="minioTable"><tbody><tr><td>加载中...</td></tr></tbody></table></div>
-            </div>
-        </div>
-    </div>
-    
-    <div id="panel-deps" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card"><h3>💿 ISO 挂载 (配置本地 YUM)</h3><div style="display:flex; flex-direction:column; gap:10px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:80px; color:#666;">上传镜像:</span><input type="file" id="isoInput" accept=".iso" style="width:300px;"><button onclick="mountIso()">上传并挂载</button></div><div style="display:flex; align-items:center; gap:10px;"><span style="width:80px; color:#666;">本地路径:</span><input type="text" id="isoPathInput" placeholder="/tmp/kylin.iso" style="width:300px;"><button class="btn-orange" onclick="mountLocalIso()">使用本地文件</button></div></div><div id="yum-log" class="term-box" style="height:120px;margin-top:10px">等待操作...</div></div><div class="card"><h3>🛠️ RPM 安装</h3><div style="display:flex;gap:10px"><input type="file" id="rpmInput" accept=".rpm"><button onclick="installRpm()">执行安装</button></div><div id="rpm-log" class="term-box" style="height:120px;margin-top:10px"></div></div></div></div>
-    
-    <div id="panel-deploy" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card"><h3>📦 系统包上传</h3><div style="display:flex;gap:10px"><input type="file" id="fileInput" accept=".tar.gz"><button onclick="uploadFile()">上传解压</button><span id="uploadStatus" style="font-weight:bold"></span></div></div><div class="card" style="flex:1"><div style="display:flex;justify-content:space-between;margin-bottom:10px;align-items:center"><h3>脚本执行</h3><div style="display:flex;gap:10px"><button id="btnRunInstall" class="btn-green" onclick="startScript('install')" disabled>部署 (install.sh)</button> <button id="btnRunUpdate" class="btn-orange" onclick="startScript('update')" disabled>更新 (mdm.sh)</button></div></div><div id="deploy-term" style="height:400px;background:#000"></div></div></div></div>
-    <div id="panel-files" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card" style="height:100%;padding:0"><div style="padding:15px;background:#f8f9fa;border-bottom:1px solid #eee"><div class="fm-toolbar"><button onclick="fmUpDir()">上级</button><button onclick="fmRefresh()">刷新</button><span id="fmPath" style="margin:0 10px;font-weight:bold">/root</span><input type="file" id="fmUploadInput" style="display:none" onchange="fmDoUpload()"><button onclick="document.getElementById('fmUploadInput').click()">上传</button></div><div id="fmStatus" style="font-size:12px;color:#666;height:15px"></div></div><div class="fm-list" style="overflow:auto;height:100%"><table style="width:100%"><tbody id="fmBody"></tbody></table></div></div></div></div>
-    <div id="panel-terminal" class="panel"><div id="sys-term" class="full-term" style="height:100vh"></div></div>
-    <div id="panel-logs" class="panel" style="padding:20px;height:100%"><div class="log-layout"><div class="log-sidebar"><div class="log-sidebar-header">日志列表</div><ul class="log-list"><li class="log-item" onclick="viewLog('tomcat', this)"><span>Tomcat</span> <button class="btn-dl-log" onclick="dlLog('tomcat', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('nginx_access', this)"><span>Nginx Access</span> <button class="btn-dl-log" onclick="dlLog('nginx_access', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('nginx_error', this)"><span>Nginx Error</span> <button class="btn-dl-log" onclick="dlLog('nginx_error', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('app_server', this)"><span>App Server</span> <button class="btn-dl-log" onclick="dlLog('app_server', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('emm_backend', this)"><span>EMM Backend</span> <button class="btn-dl-log" onclick="dlLog('emm_backend', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('license', this)"><span>License</span> <button class="btn-dl-log" onclick="dlLog('license', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('platform', this)"><span>Platform</span> <button class="btn-dl-log" onclick="dlLog('platform', event)"><i class="fas fa-download"></i></button></li></ul></div><div class="log-viewer-container"><div class="log-viewer-header"><span id="logTitle">请选择...</span><div><label><input type="checkbox" id="autoScroll" checked> 自动滚动</label> <button class="btn-sm" onclick="clearLog()">清空</button></div></div><div id="logContent" class="log-content"></div></div></div></div>
-    
-    <div id="panel-baseservices" class="panel">
-       <div class="bs-header">
-           <button class="sub-tab-btn active" onclick="switchSubTab(event, 'bs-redis')">Redis</button>
-           <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-mysql')">MySQL</button>
-           <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-rabbitmq')">RabbitMQ</button>
-           <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-minio')">MinIO</button>
-       </div>
-       
-       <div id="bs-redis" class="sub-panel active" style="padding: 20px; overflow-y: auto;">
-           <div class="container-box" style="padding:0">
-             <div class="card">
-                <h3>Redis 性能指标</h3>
-                <div id="redis-info-grid" class="grid-4">加载中...</div>
-             </div>
-             <div class="card">
-                <h3>键值管理</h3>
-                <div id="redis-keys-table-container">加载中...</div>
-             </div>
-           </div>
-       </div>
-
-       <div id="bs-mysql" class="sub-panel" style="padding: 20px; overflow-y: auto;">
-           <div class="container-box" style="padding:0">
-             <div class="card">
-                <div style="display:flex; align-items:center; gap:15px; margin-bottom:15px;">
-                   <h3>MySQL 监控</h3>
-                   <select id="db-selector" onchange="mysql.switchDB(this.value)"><option value="mdm">mdm</option><option value="multitenant">multitenant</option></select>
-                   <button class="sub-tab-btn active" onclick="switchSubTab(event, 'mysql-monitor', false, 'mysql-tab-group')">监控</button>
-                    <button class="sub-tab-btn" onclick="switchSubTab(event, 'mysql-sql', false, 'mysql-tab-group')">SQL执行</button>
-                </div>
-                <div id="mysql-monitor" class="mysql-tab-group active">
-                   <div class="grid-4" style="margin-bottom: 15px;">
-                      <div class="card"><h3>Threads</h3><div id="mysql-threads" style="font-size:1.5em;font-weight:bold;">0</div></div>
-                      <div class="card"><h3>QPS</h3><div id="mysql-qps" style="font-size:1.5em;font-weight:bold;">0</div></div>
-                      <div class="card"><h3>Max Connections</h3><div id="mysql-connections" style="font-size:1.5em;font-weight:bold;">0</div></div>
-                      <div class="card"><h3>Uptime</h3><div id="mysql-uptime" style="font-size:1.5em;font-weight:bold;">0</div></div>
-                   </div>
-                   <div class="grid-2">
-                      <div class="card"><h3>性能</h3><canvas id="mysql-metricChart"></canvas></div>
-                      <div class="card"><h3>主从复制</h3><div id="mysql-replStatus"></div><canvas id="mysql-replChart"></canvas></div>
-                      <div class="card"><h3>表空间占用 (Top 10)</h3><canvas id="mysql-tableSizeChart"></canvas></div>
-                      <div class="card"><h3>频繁操作表 (Top 10)</h3><canvas id="mysql-tableOpsChart"></canvas></div>
-                   </div>
-                   <div class="card">
-                      <h3>当前进程</h3>
-                      <input id="mysql-slowFilter" placeholder="过滤SQL..." oninput="mysql.loadProcesslist()">
-                       <div style="max-height: 400px; overflow-y: auto;"><table id="mysql-slowQueryTable"><thead><tr><th>Id</th><th>User</th><th>Host</th><th>DB</th><th>Command</th><th>Time(s)</th><th>State</th><th>Info</th></tr></thead><tbody></tbody></table></div>
-                   </div>
-                </div>
-                <div id="mysql-sql" class="mysql-tab-group" style="display:none;">
-                   <h3>执行SQL</h3>
-                   <textarea id="mysql-sqlInput" rows="5" style="width:100%; font-family:monospace;"></textarea>
-                   <button onclick="mysql.execSQL()" class="btn-green" style="margin-top:10px;">执行</button>
-                   <div id="mysql-sqlResult" class="sql-table-container"></div>
-                </div>
-             </div>
-           </div>
-       </div>
-
-       <div id="bs-rabbitmq" class="sub-panel" style="padding: 0;">
-           <iframe id="frame-rabbitmq" data-src="api/baseservices/rabbitmq/" class="iframe-container"></iframe>
-       </div>
-
-       <div id="bs-minio" class="sub-panel" style="padding: 0;">
-           <iframe id="frame-minio" data-src="api/baseservices/minio/" class="iframe-container"></iframe>
-       </div>
-    </div>
-
-    <div id="panel-about" class="panel">
-        <div class="container-box" style="max-width: 800px;">
-            <div class="card">
-                <h3>关于智能部署工具</h3>
-                <table class="about-table">
-                    <tbody>
-                        <tr><td style="width: 100px;"><strong>作者</strong></td><td>王凯</td></tr>
-                        <tr><td><strong>版本</strong></td><td>5.4 (Stable PTY)</td></tr>
-                        <tr><td><strong>更新日期</strong></td><td>2024-07-26</td></tr>
-                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li><strong>新功能：实时系统资源（内存/负载/网络）监控图表</strong></li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端 (Fix PTY)</li><li>实时查看多种 UEM 服务日志</li><li>基础服务(Redis/MySQL/RabbitMQ/MinIO)监控与管理</li></ul></td></tr>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-</div>
-
-<div id="modal-backdrop" class="modal-backdrop"></div>
-<div id="modal" class="modal">
-    <div class="modal-header"><h2 id="modal-title" class="modal-title"></h2><button id="modal-close-btn" class="modal-close">&times;</button></div>
-    <div id="modal-body" class="modal-body"></div>
-    <div class="modal-footer"><button type="button" id="modal-cancel-btn" class="btn-sm">关闭</button></div>
-</div>
-
-<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
-<script>
-    const API_BASE = "api/"; const UPLOAD_URL = "upload";
-    
-    let deployTerm, sysTerm, deploySocket, sysSocket, deployFit, sysFit, logSocket, currentPath = "/root";
-    let sysChart, netChart; let checkInterval;
-
-    window.onload = function() { initCharts(); runCheck(); fmLoadPath("/root"); startCheckPolling(); }
-    function startCheckPolling() { if(checkInterval) clearInterval(checkInterval); checkInterval = setInterval(() => { if(document.getElementById('panel-check').classList.contains('active')) { runCheck(); } }, 3000); }
-    function initCharts() {
-        const ctx = document.getElementById('sysChart').getContext('2d');
-        sysChart = new Chart(ctx, { type: 'line', data: { labels: [], datasets: [ { label: '内存使用率 (%)', data: [], borderColor: '#e74c3c', backgroundColor: 'rgba(231, 76, 60, 0.1)', fill: true, tension: 0.3 }, { label: '系统负载 (1min) - CPU活跃进程', data: [], borderColor: '#2980b9', backgroundColor: 'rgba(41, 128, 185, 0.1)', fill: true, tension: 0.3, yAxisID: 'y1' } ] }, options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false, }, scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: 'Memory %' } }, y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, title: { display: true, text: 'Load Avg' }, grid: { drawOnChartArea: false, }, }, x: { ticks: { display: false } } } } });
-        const ctx2 = document.getElementById('netChart').getContext('2d');
-        netChart = new Chart(ctx2, { type: 'line', data: { labels: [], datasets: [ { label: 'Rx (下载)', data: [], borderColor: '#27ae60', fill: false, tension: 0.3 }, { label: 'Tx (上传)', data: [], borderColor: '#f39c12', fill: false, tension: 0.3 } ] }, options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { y: { beginAtZero: true, title: { display: true, text: 'KB/s' } }, x: { ticks: { display: false } } } } });
-    }
-    function switchTab(id) {
-        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-        document.getElementById('panel-'+id).classList.add('active'); event.target.classList.add('active');
-        if (id === 'terminal') { if (!sysTerm) initSysTerm(); setTimeout(()=>sysFit.fit(), 200); }
-        if (id === 'deploy') { setTimeout(()=>deployFit && deployFit.fit(), 200); }
-        if (id === 'baseservices') { redis.init(); mysql.init(); }
-    }
-    function switchSubTab(event, id, isLink, group) {
-       if (isLink) { document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active')); const mainBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.includes('基础服务')); if(mainBtn) mainBtn.classList.add('active'); document.querySelectorAll('.panel').forEach(p => p.classList.remove('active')); document.getElementById('panel-baseservices').classList.add('active'); }
-       if(group) { const p = event.target.closest('.card'); p.querySelectorAll('.'+group).forEach(x=>x.style.display='none'); p.querySelectorAll('.sub-tab-btn').forEach(b=>b.classList.remove('active')); document.getElementById(id).style.display='block'; event.target.classList.add('active'); return; } 
-       else { const parent = document.getElementById('panel-baseservices'); parent.querySelectorAll('.sub-panel').forEach(p => p.classList.remove('active')); parent.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active')); document.getElementById(id).classList.add('active'); event.target.classList.add('active'); }
-       if (id === 'bs-rabbitmq') { const frame = document.getElementById('frame-rabbitmq'); if (!frame.src) frame.src = frame.dataset.src; } 
-       else if (id === 'bs-minio') { const frame = document.getElementById('frame-minio'); if (!frame.src) { frame.src = frame.dataset.src; frame.onload = function() { let attempts = 0; const interval = setInterval(() => { attempts++; if(attempts > 40) clearInterval(interval); try { const doc = frame.contentWindow.document; const user = doc.getElementById('accessKey'); const pass = doc.getElementById('secretKey'); const btn = doc.querySelector('button[type="submit"]'); if(user && pass && btn) { const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set; nativeInputValueSetter.call(user, 'admin'); user.dispatchEvent(new Event('input', { bubbles: true })); nativeInputValueSetter.call(pass, 'Nqsky1130'); pass.dispatchEvent(new Event('input', { bubbles: true })); setTimeout(() => { btn.click(); }, 300); clearInterval(interval); } } catch(e) {} }, 500); }; } }
-    }
-    function getWsUrl(ep) { let path = location.pathname; if (!path.endsWith('/')) path += '/'; return (location.protocol==='https:'?'wss://':'ws://') + location.host + path + ep; }
-    function viewLog(key, el) {
-        document.querySelectorAll('.log-item').forEach(l=>l.classList.remove('active')); el.classList.add('active'); document.getElementById('logTitle').innerText = "Log: " + key;
-        const box = document.getElementById('logContent'); box.innerText = "Connecting...\n";
-        if(logSocket) logSocket.close();
-        logSocket = new WebSocket(getWsUrl("ws/log?key="+key));
-        logSocket.onmessage = e => { box.innerText += e.data; if(box.innerText.length>50000) box.innerText=box.innerText.substring(box.innerText.length-50000); if(document.getElementById('autoScroll').checked) box.scrollTop=box.scrollHeight; };
-        logSocket.onclose = () => { box.innerText += "\n>>> Disconnected"; };
-    }
-    function dlLog(key, e) { e.stopPropagation(); window.location.href = API_BASE + 'log/download?key=' + key; }
-    function clearLog(){ document.getElementById('logContent').innerText=""; }
-    async function runCheck() {
-        try {
-            const resp = await fetch(API_BASE + 'check'); const data = await resp.json();
-            if(sysChart && data.sys_info.mem_usage !== undefined) {
-                const now = new Date().toLocaleTimeString();
-                if(sysChart.data.labels.length > 20) { sysChart.data.labels.shift(); sysChart.data.datasets.forEach(d => d.data.shift()); netChart.data.labels.shift(); netChart.data.datasets.forEach(d => d.data.shift()); }
-                sysChart.data.labels.push(now); sysChart.data.datasets[0].data.push(data.sys_info.mem_usage); sysChart.data.datasets[1].data.push(data.sys_info.load_avg); sysChart.update();
-                netChart.data.labels.push(now); netChart.data.datasets[0].data.push(data.sys_info.net_rx || 0); netChart.data.datasets[1].data.push(data.sys_info.net_tx || 0); netChart.update();
-            }
-            let baseHtml = '';
-            baseHtml += row('CPU', data.sys_info.cpu_cores + ' 核', data.sys_info.cpu_pass); baseHtml += row('内存', data.sys_info.mem_total, data.sys_info.mem_pass); baseHtml += row('架构', data.sys_info.arch, true); baseHtml += row('操作系统', data.sys_info.os_name, data.sys_info.os_pass);
-            baseHtml += '<tr><td>性能(ulimit)</td><td>'+data.sys_info.ulimit+'</td><td>'+(data.sys_info.ulimit_pass?'<span class="pass">OK</span>':'<span class="warn">Opt</span>')+'</td></tr>';
-            document.getElementById('baseTable').innerHTML = baseHtml;
-            let secHtml = '';
-            secHtml += '<tr><td>SELinux</td><td>'+data.sec_info.selinux+'</td><td>'+(data.sec_info.selinux==="Disabled"||data.sec_info.selinux==="Permissive"?'<span class="pass">OK</span>':'<button class="btn-sm btn-fix" onclick="fixSelinux()">⛔ 关闭</button>')+'</td></tr>';
-            
-            // Firewall Logic Fix
-            let fwStatus = data.sec_info.firewall; // Backend returns "Running" or "Stopped"
-            let fwDisplay = '';
-            if (fwStatus === 'Stopped' || fwStatus === 'Off') {
-                fwDisplay = '<span class="pass">OK</span>';
-            } else {
-                fwDisplay = '<button class="btn-sm btn-fix" onclick="fixFirewall()">⛔ 关闭</button>';
-            }
-            secHtml += '<tr><td>防火墙</td><td>'+fwStatus+'</td><td>'+fwDisplay+'</td></tr>';
-
-            let sshBtn = data.sec_info.ssh_tunnel_ok ? '<span class="pass">开启</span>' : '<span class="fail">关闭</span> <button class="btn-sm btn-fix" onclick="fixSsh()">🔧 修复</button>';
-            secHtml += '<tr><td>SSH隧道</td><td>TCP转发</td><td>'+sshBtn+'</td></tr>';
-            document.getElementById('secTable').innerHTML = secHtml;
-            let diskHtml = '<div style="display:flex; flex-direction:column; gap:12px;">';
-            data.sys_info.disk_list.forEach(d => { let color = d.usage>=90?'bg-red':(d.usage>=75?'bg-orange':'bg-green'); diskHtml += '<div><div style="font-weight:bold;margin-bottom:4px;font-size:13px;">'+d.mount+' <span style="color:#666">('+d.usage+'%)</span></div><div class="progress-bg"><div class="progress-bar '+color+'" style="width:'+d.usage+'%"></div></div><div class="disk-text"><span>'+d.used+'</span><span>'+d.total+'</span></div></div>'; });
-            document.getElementById('diskList').innerHTML = diskHtml + '</div>';
-            const uemBox = document.getElementById('uemStatusBox');
-            if (!data.uem_info.installed) { uemBox.innerHTML = '<div style="color:#7f8c8d;text-align:center;padding:20px;">未检测到 UEM</div>'; } 
-            else { let h = '<table style="width:100%"><thead><tr><th>服务</th><th>状态</th><th>操作</th></tr></thead><tbody>'; data.uem_info.services.forEach(s => { let st = s.status==='running'?'<span class="pass">Run</span>':'<span class="fail">Stop</span>'; h += '<tr><td>'+s.name+'</td><td>'+st+'</td><td><button class="btn-sm btn-restart" onclick="restartService(\''+s.name+'\')">重启</button></td></tr>'; }); uemBox.innerHTML = h + '</tbody></table>'; }
-            let mHtml = !data.minio_info.bucket_exists ? '<tr><td>Err</td><td colspan="2">桶不存在/未连接</td></tr>' : '<tr><td>nqsky</td><td>'+data.minio_info.policy+'</td><td>'+(data.minio_info.policy==='public'?'<span class="pass">OK</span>':'<button class="btn-sm btn-fix" onclick="fixMinio()">Public</button>')+'</td></tr>';
-            document.getElementById('minioTable').innerHTML = mHtml;
-        } catch(e) {}
-    }
-    function row(name, val, pass) { return '<tr><td>'+name+'</td><td>'+val+'</td><td>'+(pass?'<span class="pass">OK</span>':'<span class="fail">Fail</span>')+'</td></tr>'; }
-    async function fixSelinux() { if(confirm("关闭 SELinux (需重启)？")) fetch(API_BASE+'sec/selinux',{method:'POST'}).then(r=>r.text()).then(t=>{ alert(t); runCheck(); }); }
-    async function fixFirewall() { if(confirm("关闭防火墙？")) fetch(API_BASE+'sec/firewall',{method:'POST'}).then(r=>r.text()).then(alert).then(runCheck); }
-    async function restartService(n) { if(confirm('重启 '+n+' ?')) fetch(API_BASE+'service/restart?name='+n,{method:'POST'}).then(r=>r.text()).then(alert).then(runCheck); }
-    async function fixMinio() { if(confirm("Public?")) fetch(API_BASE+'minio/fix',{method:'POST'}).then(r=>r.text()).then(alert).then(runCheck); }
-    async function fixSsh() { if(confirm("Fix SSH?")) fetch(API_BASE+'fix_ssh',{method:'POST'}).then(r=>r.text()).then(alert); }
-    async function fmLoadPath(p) { currentPath=p; document.getElementById('fmPath').innerText=p; const r=await fetch(API_BASE+'fs/list?path='+encodeURIComponent(p)); const fs=await r.json(); let h=''; fs.sort((a,b)=>(a.is_dir===b.is_dir)?0:a.is_dir?-1:1); fs.forEach(f=>{ let n=f.is_dir?'<a class="link-dir" href="javascript:fmLoadPath(\''+f.path+'\')">'+f.name+'</a>':f.name; let act=f.is_dir?'':'<button class="btn-sm" onclick="fmDownload(\''+f.path+'\')">下载</button>'; h+='<tr><td>'+(f.is_dir?'📁':'📄')+' '+n+'</td><td>'+f.size+'</td><td>'+f.mod_time+'</td><td>'+act+'</td></tr>'; }); document.getElementById('fmBody').innerHTML=h; }
-    function fmUpDir() { let p=currentPath.split('/'); p.pop(); let n=p.join('/'); if(!n)n='/'; fmLoadPath(n); }
-    function fmDownload(p) { window.location.href = API_BASE + 'fs/download?path=' + encodeURIComponent(p); }
-    async function fmDoUpload() { const inp=document.getElementById('fmUploadInput'); const fd=new FormData(); fd.append("file", inp.files[0]); fd.append("path", currentPath); const st=document.getElementById('fmStatus'); st.innerText="Uploading..."; await fetch(API_BASE+'upload_any', {method:'POST', body:fd}); st.innerText="Done"; fmLoadPath(currentPath); }
-    async function mountIso() { const inp=document.getElementById('isoInput'); if(!inp.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file",inp.files[0]); const r=await fetch(API_BASE+'iso_mount',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('yum-log'); while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
-    async function mountLocalIso() { const p = document.getElementById('isoPathInput').value; if(!p) return alert("请输入路径"); event.target.disabled=true; const fd=new FormData(); fd.append("path", p); const r=await fetch(API_BASE+'iso_mount_local',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('yum-log'); box.innerText = ">>> 正在使用本地文件挂载...\n"; while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
-    async function installRpm() { const i=document.getElementById('rpmInput'); if(!i.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file",i.files[0]); const r=await fetch(API_BASE+'rpm_install',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('rpm-log'); while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
-    async function uploadFile() { const i=document.getElementById('fileInput'); if(!i.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file", i.files[0]); try { const r=await fetch(UPLOAD_URL, {method:'POST', body:fd}); if(r.ok) { document.getElementById('uploadStatus').innerHTML = "<span class='pass'>✅ 成功</span>"; document.getElementById('btnRunInstall').disabled=false; document.getElementById('btnRunUpdate').disabled=false; } else { throw await r.text(); } } catch(e){alert("Error: "+e);} event.target.disabled=false; }
-    function startScript(type) { if(deployTerm) deployTerm.dispose(); if(deploySocket) deploySocket.close(); deployTerm=new Terminal({cursorBlink:true,fontSize:13,theme:{background:'#000'}}); deployFit=new FitAddon.FitAddon(); deployTerm.loadAddon(deployFit); deployTerm.open(document.getElementById('deploy-term')); deployFit.fit(); deploySocket=new WebSocket(getWsUrl("ws/deploy?type="+type)); setupSocket(deploySocket, deployTerm, deployFit); document.getElementById('btnRunInstall').disabled=true; document.getElementById('btnRunUpdate').disabled=true; }
-    function initSysTerm() { sysTerm=new Terminal({cursorBlink:true,fontSize:14,fontFamily:'Consolas, monospace'}); sysFit=new FitAddon.FitAddon(); sysTerm.loadAddon(sysFit); sysTerm.open(document.getElementById('sys-term')); sysFit.fit(); sysSocket=new WebSocket(getWsUrl("ws/terminal")); setupSocket(sysSocket, sysTerm, sysFit); }
-    function setupSocket(s, t, f) { s.onopen=()=>{s.send(JSON.stringify({type:"resize",cols:t.cols,rows:t.rows}));f.fit()}; s.onmessage=e=>t.write(e.data); t.onData(d=>{if(s.readyState===1)s.send(JSON.stringify({type:"input",data:d}))}); window.addEventListener('resize',()=>{f.fit();if(s.readyState===1)s.send(JSON.stringify({type:"resize",cols:t.cols,rows:t.rows}))}); }
-    function escapeHtml(unsafe) { return unsafe ? unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;") : ''; }
-
-    const redis = {
-       allKeys: [], currentFilter: 'all', initialized: false,
-       init: function() { if(this.initialized) return; this.fetchInfo(); this.fetchAllKeys(); this.initialized = true; },
-       fetchInfo: async function() { try { const res = await fetch(API_BASE + 'baseservices/redis/info'); if (!res.ok) throw new Error('Failed to fetch info'); const info = await res.json(); const metrics = {'redis_version': 'Version', 'uptime_in_days': 'Uptime (Days)', 'connected_clients': 'Clients', 'used_memory_human': 'Memory', 'total_commands_processed': 'Commands', 'instantaneous_ops_per_sec': 'Ops/Sec'}; const grid = document.getElementById('redis-info-grid'); grid.innerHTML = ''; for (const key in metrics) { if (info[key]) grid.innerHTML += '<div class="card"><h3>' + metrics[key] + '</h3><p style="font-size:1.5em;font-weight:bold;">' + info[key] + '</p></div>'; } } catch (e) { document.getElementById('redis-info-grid').innerHTML = '<p class="fail">Failed to load Redis stats.</p>'; } },
-       fetchAllKeys: async function() { try { const res = await fetch(API_BASE + 'baseservices/redis/keys'); if (!res.ok) throw new Error('Failed to fetch keys'); this.allKeys = await res.json() || []; this.allKeys.sort((a, b) => a.key.localeCompare(b.key)); this.renderTable(); } catch (e) { document.getElementById('redis-keys-table-container').innerHTML = '<p class="fail">Failed to load keys.</p>'; } },
-       renderTable: function() { let html = '<table><thead><tr><th>Key</th><th>Type</th><th>Actions</th></tr></thead><tbody>'; this.allKeys.forEach(item => { html += '<tr><td title="' + escapeHtml(item.key) + '">' + escapeHtml(item.key) + '</td><td>' + escapeHtml(item.type) + '</td><td><button class="btn-sm" onclick="redis.viewEditKey(\'' + item.key + '\', \'' + item.type + '\')">View/Edit</button> <button class="btn-sm btn-red" onclick="redis.deleteKey(\'' + item.key + '\')">Delete</button></td></tr>'; }); html += '</tbody></table>'; document.getElementById('redis-keys-table-container').innerHTML = html; },
-       deleteKey: async function(key) { if (!confirm('确认删除: ' + key + '?')) return; await fetch(API_BASE + 'baseservices/redis/key?key=' + encodeURIComponent(key), { method: 'DELETE' }); this.fetchAllKeys(); },
-       viewEditKey: async function(key, type) { document.getElementById('modal-title').textContent = 'Editing ' + type + ': ' + key; document.getElementById('modal-body').innerHTML = '<p>Loading...</p>'; document.getElementById('modal-backdrop').style.display = 'block'; document.getElementById('modal').style.display = 'block'; const res = await fetch(API_BASE + 'baseservices/redis/value?type=' + type + '&key=' + encodeURIComponent(key)); const data = await res.json(); this.renderModalContent(data); },
-       renderModalContent: function(data) {
-          let body = '';
-          switch (data.type) {
-             case 'string': body = '<div class="form-group"><label>Value</label><textarea id="stringValue" rows="5" style="width:100%">' + escapeHtml(data.value) + '</textarea></div><button class="btn-green" onclick="redis.saveStringValue(\'' + data.key + '\')">Save</button>'; break;
-             case 'list': let items = data.value.map(item => '<div class="list-item"><span>' + escapeHtml(item) + '</span><button class="btn-sm btn-red" onclick="redis.deleteListItem(\'' + data.key + '\', \'' + escapeHtml(item) + '\')">Delete</button></div>').join(''); body = '<div class="form-group"><input type="text" id="newListItem" placeholder="New Item" style="width:100%"><button class="btn-green" style="margin-top:10px;" onclick="redis.addListItem(\'' + data.key + '\')">Add</button></div><hr>' + items; break;
-             case 'hash': let fields = Object.entries(data.value).map(([f, v]) => '<div class="hash-item"><span><strong>' + escapeHtml(f) + ':</strong> ' + escapeHtml(v) + '</span><button class="btn-sm btn-red" onclick="redis.deleteHashField(\'' + data.key + '\', \'' + escapeHtml(f) + '\')">Delete</button></div>').join(''); body = '<div class="form-group"><input type="text" id="newHashField" placeholder="Field" style="width:100%"><textarea id="newHashValue" placeholder="Value" style="width:100%"></textarea><button class="btn-green" style="margin-top:10px;" onclick="redis.addHashField(\'' + data.key + '\')">Save</button></div><hr>' + fields; break;
-             default: body = '<p>Unsupported type: ' + data.type + '</p>';
-          }
-          document.getElementById('modal-body').innerHTML = body;
-       },
-       saveStringValue: async function(key) { const value = document.getElementById('stringValue').value; await fetch(API_BASE + 'baseservices/redis/value?type=string&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) }); this.hideModal(); },
-       addListItem: async function(key) { const value = document.getElementById('newListItem').value; if (!value) return; await fetch(API_BASE + 'baseservices/redis/value?type=list&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) }); this.viewEditKey(key, 'list'); },
-       deleteListItem: async function(key, value) { await fetch(API_BASE + 'baseservices/redis/value?type=list&key=' + encodeURIComponent(key) + '&value=' + encodeURIComponent(value), { method: 'DELETE' }); this.viewEditKey(key, 'list'); },
-       addHashField: async function(key) { const field = document.getElementById('newHashField').value; const value = document.getElementById('newHashValue').value; if (!field) return; await fetch(API_BASE + 'baseservices/redis/value?type=hash&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field, value }) }); this.viewEditKey(key, 'hash'); },
-       deleteHashField: async function(key, field) { await fetch(API_BASE + 'baseservices/redis/value?type=hash&key=' + encodeURIComponent(key) + '&field=' + encodeURIComponent(field), { method: 'DELETE' }); this.viewEditKey(key, 'hash'); },
-       hideModal: function() { document.getElementById('modal-backdrop').style.display = 'none'; document.getElementById('modal').style.display = 'none'; }
-    };
-    document.getElementById('modal-close-btn').addEventListener('click', () => redis.hideModal());
-    document.getElementById('modal-cancel-btn').addEventListener('click', () => redis.hideModal());
-    document.getElementById('modal-backdrop').addEventListener('click', () => redis.hideModal());
-
-    const mysql = {
-       currentDB: 'mdm', initialized: false, charts: {},
-       init: function() {
-          if(this.initialized) return;
-          this.charts.metric = new Chart(document.getElementById('mysql-metricChart').getContext('2d'), { type: 'line', data: { labels: [], datasets: [{ label: 'Threads', data: [], borderColor: '#2980b9', fill: false }, { label: 'QPS', data: [], borderColor: '#27ae60', fill: false }] }, options: { responsive: true, animation: false } });
-          this.charts.size = new Chart(document.getElementById('mysql-tableSizeChart').getContext('2d'), { type: 'bar', data: { labels: [], datasets: [{ label: 'Size MB', data: [], backgroundColor: 'rgba(52, 152, 219, 0.6)' }] }, options: { responsive: true, indexAxis: 'y' } });
-          this.charts.ops = new Chart(document.getElementById('mysql-tableOpsChart').getContext('2d'), { type: 'bar', data: { labels: [], datasets: [{ label: 'Ops', data: [], backgroundColor: 'rgba(231, 76, 60, 0.6)' }] }, options: { responsive: true, indexAxis: 'y' } });
-          this.charts.repl = new Chart(document.getElementById('mysql-replChart').getContext('2d'), { type: 'line', data: { labels: [], datasets: [{ label: 'Delay(s)', data: [], borderColor: '#c0392b', fill: false }] }, options: { responsive: true, animation: false } });
-          this.loadAll(); setInterval(() => this.loadAll(), 10000); this.initialized = true;
-       },
-       switchDB: function(db) { this.currentDB = db; this.loadAll(); },
-       loadAll: async function() { await Promise.all([ this.loadMetrics(), this.loadTables(), this.loadProcesslist(), this.loadRepl() ]); },
-       loadMetrics: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/metrics/' + this.currentDB); const arr = await res.json(); if (!arr || arr.length === 0) return; const m = arr[0]; document.getElementById('mysql-threads').innerText = m.threads; document.getElementById('mysql-qps').innerText = m.qps; document.getElementById('mysql-connections').innerText = m.max_connections; document.getElementById('mysql-uptime').innerText = m.uptime_str; const now = new Date().toLocaleTimeString(); if (this.charts.metric.data.labels.length > 20) { this.charts.metric.data.labels.shift(); this.charts.metric.data.datasets.forEach(ds => ds.data.shift()); } this.charts.metric.data.labels.push(now); this.charts.metric.data.datasets[0].data.push(m.threads); this.charts.metric.data.datasets[1].data.push(m.qps); this.charts.metric.update(); } catch (e) { console.error('mysql.loadMetrics', e); } },
-       loadTables: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/tables/' + this.currentDB); const data = await res.json(); if (!Array.isArray(data)) return; this.charts.size.data.labels = data.map(d => d.name); this.charts.size.data.datasets[0].data = data.map(d => d.size_mb); this.charts.size.update(); this.charts.ops.data.labels = data.map(d => d.name); this.charts.ops.data.datasets[0].data = data.map(d => d.ops); this.charts.ops.update(); } catch (e) { console.error('mysql.loadTables', e); } },
-       loadProcesslist: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/processlist/' + this.currentDB); const data = await res.json(); const filter = document.getElementById('mysql-slowFilter').value.toLowerCase(); const tbody = document.querySelector('#mysql-slowQueryTable tbody'); tbody.innerHTML = ''; (data || []).forEach(q => { if (filter && (!q.info || !q.info.toLowerCase().includes(filter))) return; tbody.innerHTML += '<tr><td>' + q.id + '</td><td>' + q.user + '</td><td>' + q.host + '</td><td>' + q.db + '</td><td>' + q.command + '</td><td>' + q.time + '</td><td>' + q.state + '</td><td>' + escapeHtml(q.info) + '</td></tr>'; }); } catch (e) { console.error('mysql.loadProcesslist', e); } },
-       loadRepl: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/replstatus/' + this.currentDB); const r = await res.json(); document.getElementById('mysql-replStatus').innerHTML = 'Role: ' + r.role + ' | Slave Running: <span class="' + (r.slave_running ? 'pass' : 'fail') + '">' + r.slave_running + '</span> | Delay(s): ' + r.seconds_behind; if (this.charts.repl.data.labels.length > 20) { this.charts.repl.data.labels.shift(); this.charts.repl.data.datasets[0].data.shift(); } this.charts.repl.data.labels.push(new Date().toLocaleTimeString()); this.charts.repl.data.datasets[0].data.push(r.seconds_behind || 0); this.charts.repl.update(); } catch (e) { console.error('mysql.loadRepl', e); } },
-       execSQL: async function() { const sql = document.getElementById('mysql-sqlInput').value.trim(); if (!sql) return; const res = await fetch(API_BASE + 'baseservices/mysql/execsql/' + this.currentDB, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) }); const result = await res.json(); const div = document.getElementById('mysql-sqlResult'); if(result.error) { div.innerHTML = '<div style="color:red; padding:10px;">Error: ' + escapeHtml(result.error) + '</div>'; return; } if(!result.columns || result.columns.length === 0) { div.innerHTML = '<div style="padding:10px; color:#666;">Query executed successfully. No rows returned.</div>'; return; } let tableHtml = '<table class="sql-table"><thead><tr>'; result.columns.forEach(col => { tableHtml += '<th>' + escapeHtml(col) + '</th>'; }); tableHtml += '</tr></thead><tbody>'; if(result.rows) { result.rows.forEach(row => { tableHtml += '<tr>'; row.forEach(cell => { tableHtml += '<td>' + escapeHtml(cell) + '</td>'; }); tableHtml += '</tr>'; }); } tableHtml += '</tbody></table>'; div.innerHTML = tableHtml; }
-    };
-</script>
-</body>
-</html>
-`
-
 var upgrader = websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }}
 
 // Data Structures
@@ -1639,3 +1253,389 @@ func formatBytes(b int64) string {
 	}
 	return fmt.Sprintf("%.1f%cB", float64(b)/float64(d), "KMGTPE"[e])
 }
+
+// ================= 2. 前端页面 =================
+const htmlPage = `
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>综合运维平台</title>
+    <script>
+        if (!window.location.pathname.endsWith('/') && !window.location.pathname.endsWith('.html')) {
+            var newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "/" + window.location.search;
+            window.history.replaceState(null, null, newUrl);
+            window.location.reload(); 
+        }
+    </script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css" />
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; background: #2c3e50; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        .navbar { background: #34495e; padding: 0 20px; height: 50px; display: flex; align-items: center; border-bottom: 1px solid #1abc9c; flex-shrink: 0; }
+        .brand { color: #fff; font-weight: bold; font-size: 18px; margin-right: 20px; }
+        .tab-btn { background: transparent; border: none; color: #bdc3c7; font-size: 13px; padding: 0 10px; height: 100%; cursor: pointer; transition: 0.3s; border-bottom: 3px solid transparent; }
+        .tab-btn:hover { color: white; background: rgba(255,255,255,0.05); }
+        .tab-btn.active { color: #1abc9c; border-bottom: 3px solid #1abc9c; background: rgba(26, 188, 156, 0.1); }
+        .content { flex: 1; position: relative; background: #ecf0f1; overflow: hidden; display: flex; flex-direction: column; }
+        .panel { display: none; width: 100%; height: 100%; padding: 20px; box-sizing: border-box; overflow-y: auto; }
+        .panel.active { display: block; }
+        #panel-baseservices { padding: 0; display: none; flex-direction: column; height: 100%; overflow: hidden; }
+        #panel-baseservices.active { display: flex; }
+        .container-box { padding: 20px; max-width: 1200px; margin: 0 auto; width: 100%; box-sizing: border-box; }
+        .card { background: white; padding: 15px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 15px; display: flex; flex-direction: column; }
+        h3 { margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; color: #2c3e50; display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
+        .term-box { flex: 1; background: #1e1e1e; padding: 10px; overflow-y: auto; border-radius: 6px; color: #0f0; font-family: Consolas, monospace; font-size: 13px; white-space: pre-wrap; border: 1px solid #333; }
+        .full-term { width: 100%; height: 100%; background: #000; padding: 10px; box-sizing: border-box; }
+        table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 14px; }
+        th, td { text-align: left; padding: 8px; border-bottom: 1px solid #eee; }
+        th { background-color: #f8f9fa; color: #666; position: sticky; top: 0; }
+        .pass { color: #27ae60; font-weight: bold; }
+        .fail { color: #c0392b; font-weight: bold; }
+        .warn { color: #f39c12; font-weight: bold; }
+        .progress-bg { width: 100%; background-color: #e0e0e0; border-radius: 4px; height: 16px; overflow: hidden; position: relative; }
+        .progress-bar { height: 100%; text-align: center; line-height: 16px; color: white; font-size: 10px; transition: width 0.5s; }
+        .bg-green { background-color: #27ae60; } .bg-orange { background-color: #f39c12; } .bg-red { background-color: #c0392b; }
+        .disk-text { font-size: 12px; color: #666; margin-top: 2px; display: flex; justify-content: space-between; }
+        .fm-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; padding-bottom: 10px; border-bottom: 1px solid #eee; }
+        .fm-path { flex: 1; padding: 5px; border: 1px solid #ddd; border-radius: 4px; background: #f9f9f9; font-family: monospace; }
+        .fm-list { flex: 1; overflow-y: auto; }
+        .icon-dir { color: #f39c12; margin-right: 5px; } .icon-file { color: #95a5a6; margin-right: 5px; }
+        .link-dir { color: #2980b9; cursor: pointer; text-decoration: none; font-weight: bold; } .link-dir:hover { text-decoration: underline; }
+        .log-layout { display: flex; height: 100%; border: 1px solid #ddd; border-radius: 6px; overflow: hidden; background: white; }
+        .log-sidebar { width: 240px; background: #f8f9fa; border-right: 1px solid #ddd; display: flex; flex-direction: column; }
+        .log-sidebar-header { padding: 10px; background: #e9ecef; font-weight: bold; font-size: 14px; border-bottom: 1px solid #ddd; }
+        .log-list { flex: 1; overflow-y: auto; list-style: none; padding: 0; margin: 0; }
+        .log-item { padding: 8px 12px; cursor: pointer; font-size: 13px; color: #333; border-bottom: 1px solid #f1f1f1; transition: 0.2s; display: flex; justify-content: space-between; align-items: center; }
+        .log-item:hover { background: #e2e6ea; } .log-item.active { background: #3498db; color: white; border-left: 4px solid #2980b9; }
+        .log-viewer-container { flex: 1; display: flex; flex-direction: column; background: #1e1e1e; }
+        .log-viewer-header { padding: 5px 10px; background: #2c3e50; color: #ecf0f1; font-size: 12px; display: flex; justify-content: space-between; align-items: center; }
+        .log-content { flex: 1; overflow-y: auto; padding: 10px; font-family: 'Consolas', monospace; font-size: 12px; color: #dcdcdc; white-space: pre-wrap; word-break: break-all; }
+        button { background: #2980b9; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: 0.2s; }
+        button:hover { background: #3498db; } button:disabled { background: #95a5a6; cursor: not-allowed; }
+        .btn-sm { padding: 4px 8px; font-size: 12px; } 
+        .btn-fix { background: #e67e22; } .btn-fix:hover { background: #d35400; }
+        .btn-green { background: #27ae60; } .btn-green:hover { background: #219150; }
+        .btn-orange { background: #e67e22; } .btn-orange:hover { background: #d35400; }
+        .btn-red { background: #e74c3c; } .btn-red:hover { background: #c0392b; }
+        .btn-restart { background: #e74c3c; } .btn-restart:hover { background: #c0392b; }
+        .btn-dl-log { background: transparent; border: 1px solid #ccc; color: #666; padding: 2px 6px; border-radius: 3px; font-size: 11px; cursor: pointer; }
+        .btn-dl-log:hover { background: #27ae60; color: white; border-color: #27ae60; }
+        input[type="file"], input[type="text"], textarea, select { border: 1px solid #ccc; padding: 5px; background: white; font-size: 13px; border-radius: 4px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
+        .about-table td { padding: 10px; }
+        .about-table tr:not(:last-child) td { border-bottom: 1px solid #f0f0f0; }
+       .bs-header { padding: 10px 20px; background: #e9ecef; display: flex; gap: 5px; border-bottom: 1px solid #ddd; flex-shrink: 0; }
+       .sub-tab-btn { background: #fff; color: #666; border: 1px solid #ddd; padding: 6px 14px; cursor: pointer; border-radius: 4px; font-size: 13px; }
+       .sub-tab-btn:hover { background: #f8f9fa; }
+       .sub-tab-btn.active { background: #2980b9; color: white; border-color: #2980b9; }
+       .sub-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; background: #fff; width: 100%; height: 100%; }
+       .sub-panel.active { display: flex; }
+       .modal-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 100; display: none; }
+        .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 101; width: 90%; max-width: 700px; display: none; max-height: 80vh; overflow-y: auto; }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #dee2e6; padding-bottom: 10px; margin-bottom: 20px; }
+        .modal-title { margin: 0; font-size: 1.25rem; }
+        .modal-close { background: none; border: none; font-size: 1.5rem; cursor: pointer; }
+        .modal-body { margin-bottom: 20px; }
+        .modal-footer { border-top: 1px solid #dee2e6; padding-top: 15px; margin-top: 20px; text-align: right; }
+       .list-item, .hash-item { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #e9ecef; }
+       .iframe-container { flex: 1; width: 100%; height: 100%; border: none; display: block; }
+       .sql-table-container { overflow: auto; max-height: 400px; border: 1px solid #ddd; margin-top: 10px; }
+       .sql-table { width: 100%; border-collapse: collapse; font-size: 13px; font-family: Consolas, monospace; white-space: nowrap; }
+       .sql-table th { background: #f8f9fa; position: sticky; top: 0; border-bottom: 2px solid #ddd; padding: 8px; text-align: left; color: #333; }
+       .sql-table td { border-bottom: 1px solid #eee; padding: 6px 8px; color: #444; }
+       .sql-table tr:hover { background-color: #f1f1f1; }
+    </style>
+</head>
+<body>
+<div class="navbar">
+    <button class="tab-btn active" onclick="switchTab('check')">🔍 操作系统</button>
+    <button class="tab-btn" onclick="switchTab('deps')">🔧 环境依赖</button>
+    <button class="tab-btn" onclick="switchTab('deploy')">📦 部署/更新</button>
+    <button class="tab-btn" onclick="switchTab('files')">📂 文件管理</button>
+    <button class="tab-btn" onclick="switchTab('terminal')">💻 终端</button>
+    <button class="tab-btn" onclick="switchTab('logs')">📜 日志查看</button>
+    <button class="tab-btn" onclick="switchTab('baseservices')">⚙️ 基础服务</button>
+    <button class="tab-btn" onclick="switchTab('about')">ℹ️ 关于</button>
+</div>
+<div class="content">
+    <div id="panel-check" class="panel active">
+        <div class="grid-2">
+            <div class="card">
+                <h3>📈 系统资源 (3秒刷新)</h3>
+                <div style="height: 200px; position: relative;">
+                    <canvas id="sysChart"></canvas>
+                </div>
+            </div>
+            <div class="card">
+                <h3>🌐 网络流量 (KB/s)</h3>
+                <div style="height: 200px; position: relative;">
+                    <canvas id="netChart"></canvas>
+                </div>
+            </div>
+        </div>
+        <br>
+        <div class="grid-2">
+            <div>
+                <div class="card"><h3>🖥️ 基础环境 <button onclick="runCheck()" class="btn-sm"><i class="fas fa-sync"></i> 刷新</button></h3><table id="baseTable"><tbody><tr><td>加载中...</td></tr></tbody></table></div>
+                <div class="card"><h3>💾 磁盘空间概览</h3><div id="diskList" style="margin-top:10px;">加载中...</div></div>
+                <div class="card"><h3>🛡️ 安全与网络</h3><table id="secTable"><tbody><tr><td>加载中...</td></tr></tbody></table></div>
+            </div>
+            <div>
+                <div class="card"><h3>🚀 UEM 服务监控</h3><div id="uemStatusBox"><p>检测 UEM 安装状态...</p></div></div>
+                <div class="card"><h3>🗄️ MinIO 检测</h3><table id="minioTable"><tbody><tr><td>加载中...</td></tr></tbody></table></div>
+            </div>
+        </div>
+    </div>
+    
+    <div id="panel-deps" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card"><h3>💿 ISO 挂载 (配置本地 YUM)</h3><div style="display:flex; flex-direction:column; gap:10px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:80px; color:#666;">上传镜像:</span><input type="file" id="isoInput" accept=".iso" style="width:300px;"><button onclick="mountIso()">上传并挂载</button></div><div style="display:flex; align-items:center; gap:10px;"><span style="width:80px; color:#666;">本地路径:</span><input type="text" id="isoPathInput" placeholder="/tmp/kylin.iso" style="width:300px;"><button class="btn-orange" onclick="mountLocalIso()">使用本地文件</button></div></div><div id="yum-log" class="term-box" style="height:120px;margin-top:10px">等待操作...</div></div><div class="card"><h3>🛠️ RPM 安装</h3><div style="display:flex;gap:10px"><input type="file" id="rpmInput" accept=".rpm"><button onclick="installRpm()">执行安装</button></div><div id="rpm-log" class="term-box" style="height:120px;margin-top:10px"></div></div></div></div>
+    
+    <div id="panel-deploy" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card"><h3>📦 系统包上传</h3><div style="display:flex;gap:10px"><input type="file" id="fileInput" accept=".tar.gz"><button onclick="uploadFile()">上传解压</button><span id="uploadStatus" style="font-weight:bold"></span></div></div><div class="card" style="flex:1"><div style="display:flex;justify-content:space-between;margin-bottom:10px;align-items:center"><h3>脚本执行</h3><div style="display:flex;gap:10px"><button id="btnRunInstall" class="btn-green" onclick="startScript('install')" disabled>部署 (install.sh)</button> <button id="btnRunUpdate" class="btn-orange" onclick="startScript('update')" disabled>更新 (mdm.sh)</button></div></div><div id="deploy-term" style="height:400px;background:#000"></div></div></div></div>
+    <div id="panel-files" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card" style="height:100%;padding:0"><div style="padding:15px;background:#f8f9fa;border-bottom:1px solid #eee"><div class="fm-toolbar"><button onclick="fmUpDir()">上级</button><button onclick="fmRefresh()">刷新</button><span id="fmPath" style="margin:0 10px;font-weight:bold">/root</span><input type="file" id="fmUploadInput" style="display:none" onchange="fmDoUpload()"><button onclick="document.getElementById('fmUploadInput').click()">上传</button></div><div id="fmStatus" style="font-size:12px;color:#666;height:15px"></div></div><div class="fm-list" style="overflow:auto;height:100%"><table style="width:100%"><tbody id="fmBody"></tbody></table></div></div></div></div>
+    <div id="panel-terminal" class="panel"><div id="sys-term" class="full-term" style="height:100vh"></div></div>
+    <div id="panel-logs" class="panel" style="padding:20px;height:100%"><div class="log-layout"><div class="log-sidebar"><div class="log-sidebar-header">日志列表</div><ul class="log-list"><li class="log-item" onclick="viewLog('tomcat', this)"><span>Tomcat</span> <button class="btn-dl-log" onclick="dlLog('tomcat', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('nginx_access', this)"><span>Nginx Access</span> <button class="btn-dl-log" onclick="dlLog('nginx_access', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('nginx_error', this)"><span>Nginx Error</span> <button class="btn-dl-log" onclick="dlLog('nginx_error', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('app_server', this)"><span>App Server</span> <button class="btn-dl-log" onclick="dlLog('app_server', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('emm_backend', this)"><span>EMM Backend</span> <button class="btn-dl-log" onclick="dlLog('emm_backend', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('license', this)"><span>License</span> <button class="btn-dl-log" onclick="dlLog('license', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('platform', this)"><span>Platform</span> <button class="btn-dl-log" onclick="dlLog('platform', event)"><i class="fas fa-download"></i></button></li></ul></div><div class="log-viewer-container"><div class="log-viewer-header"><span id="logTitle">请选择...</span><div><label><input type="checkbox" id="autoScroll" checked> 自动滚动</label> <button class="btn-sm" onclick="clearLog()">清空</button></div></div><div id="logContent" class="log-content"></div></div></div></div>
+    
+    <div id="panel-baseservices" class="panel">
+       <div class="bs-header">
+           <button class="sub-tab-btn active" onclick="switchSubTab(event, 'bs-redis')">Redis</button>
+           <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-mysql')">MySQL</button>
+           <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-rabbitmq')">RabbitMQ</button>
+           <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-minio')">MinIO</button>
+       </div>
+       
+       <div id="bs-redis" class="sub-panel active" style="padding: 20px; overflow-y: auto;">
+           <div class="container-box" style="padding:0">
+             <div class="card">
+                <h3>Redis 性能指标</h3>
+                <div id="redis-info-grid" class="grid-4">加载中...</div>
+             </div>
+             <div class="card">
+                <h3>键值管理</h3>
+                <div id="redis-keys-table-container">加载中...</div>
+             </div>
+           </div>
+       </div>
+
+       <div id="bs-mysql" class="sub-panel" style="padding: 20px; overflow-y: auto;">
+           <div class="container-box" style="padding:0">
+             <div class="card">
+                <div style="display:flex; align-items:center; gap:15px; margin-bottom:15px;">
+                   <h3>MySQL 监控</h3>
+                   <select id="db-selector" onchange="mysql.switchDB(this.value)"><option value="mdm">mdm</option><option value="multitenant">multitenant</option></select>
+                   <button class="sub-tab-btn active" onclick="switchSubTab(event, 'mysql-monitor', false, 'mysql-tab-group')">监控</button>
+                    <button class="sub-tab-btn" onclick="switchSubTab(event, 'mysql-sql', false, 'mysql-tab-group')">SQL执行</button>
+                </div>
+                <div id="mysql-monitor" class="mysql-tab-group active">
+                   <div class="grid-4" style="margin-bottom: 15px;">
+                      <div class="card"><h3>Threads</h3><div id="mysql-threads" style="font-size:1.5em;font-weight:bold;">0</div></div>
+                      <div class="card"><h3>QPS</h3><div id="mysql-qps" style="font-size:1.5em;font-weight:bold;">0</div></div>
+                      <div class="card"><h3>Max Connections</h3><div id="mysql-connections" style="font-size:1.5em;font-weight:bold;">0</div></div>
+                      <div class="card"><h3>Uptime</h3><div id="mysql-uptime" style="font-size:1.5em;font-weight:bold;">0</div></div>
+                   </div>
+                   <div class="grid-2">
+                      <div class="card"><h3>性能</h3><canvas id="mysql-metricChart"></canvas></div>
+                      <div class="card"><h3>主从复制</h3><div id="mysql-replStatus"></div><canvas id="mysql-replChart"></canvas></div>
+                      <div class="card"><h3>表空间占用 (Top 10)</h3><canvas id="mysql-tableSizeChart"></canvas></div>
+                      <div class="card"><h3>频繁操作表 (Top 10)</h3><canvas id="mysql-tableOpsChart"></canvas></div>
+                   </div>
+                   <div class="card">
+                      <h3>当前进程</h3>
+                      <input id="mysql-slowFilter" placeholder="过滤SQL..." oninput="mysql.loadProcesslist()">
+                       <div style="max-height: 400px; overflow-y: auto;"><table id="mysql-slowQueryTable"><thead><tr><th>Id</th><th>User</th><th>Host</th><th>DB</th><th>Command</th><th>Time(s)</th><th>State</th><th>Info</th></tr></thead><tbody></tbody></table></div>
+                   </div>
+                </div>
+                <div id="mysql-sql" class="mysql-tab-group" style="display:none;">
+                   <h3>执行SQL</h3>
+                   <textarea id="mysql-sqlInput" rows="5" style="width:100%; font-family:monospace;"></textarea>
+                   <button onclick="mysql.execSQL()" class="btn-green" style="margin-top:10px;">执行</button>
+                   <div id="mysql-sqlResult" class="sql-table-container"></div>
+                </div>
+             </div>
+           </div>
+       </div>
+
+       <div id="bs-rabbitmq" class="sub-panel" style="padding: 0;">
+           <iframe id="frame-rabbitmq" data-src="api/baseservices/rabbitmq/" class="iframe-container"></iframe>
+       </div>
+
+       <div id="bs-minio" class="sub-panel" style="padding: 0;">
+           <iframe id="frame-minio" data-src="api/baseservices/minio/" class="iframe-container"></iframe>
+       </div>
+    </div>
+
+    <div id="panel-about" class="panel">
+        <div class="container-box" style="max-width: 800px;">
+            <div class="card">
+                <h3>关于智能部署工具</h3>
+                <table class="about-table">
+                    <tbody>
+                        <tr><td style="width: 100px;"><strong>作者</strong></td><td>王凯</td></tr>
+                        <tr><td><strong>版本</strong></td><td>5.4 (Stable PTY)</td></tr>
+                        <tr><td><strong>更新日期</strong></td><td>2024-07-26</td></tr>
+                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li><strong>新功能：实时系统资源（内存/负载/网络）监控图表</strong></li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端 (Fix PTY)</li><li>实时查看多种 UEM 服务日志</li><li>基础服务(Redis/MySQL/RabbitMQ/MinIO)监控与管理</li></ul></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div id="modal-backdrop" class="modal-backdrop"></div>
+<div id="modal" class="modal">
+    <div class="modal-header"><h2 id="modal-title" class="modal-title"></h2><button id="modal-close-btn" class="modal-close">&times;</button></div>
+    <div id="modal-body" class="modal-body"></div>
+    <div class="modal-footer"><button type="button" id="modal-cancel-btn" class="btn-sm">关闭</button></div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"></script>
+<script>
+    const API_BASE = "api/"; const UPLOAD_URL = "upload";
+    
+    let deployTerm, sysTerm, deploySocket, sysSocket, deployFit, sysFit, logSocket, currentPath = "/root";
+    let sysChart, netChart; let checkInterval;
+
+    window.onload = function() { initCharts(); runCheck(); fmLoadPath("/root"); startCheckPolling(); }
+    function startCheckPolling() { if(checkInterval) clearInterval(checkInterval); checkInterval = setInterval(() => { if(document.getElementById('panel-check').classList.contains('active')) { runCheck(); } }, 3000); }
+    function initCharts() {
+        const ctx = document.getElementById('sysChart').getContext('2d');
+        sysChart = new Chart(ctx, { type: 'line', data: { labels: [], datasets: [ { label: '内存使用率 (%)', data: [], borderColor: '#e74c3c', backgroundColor: 'rgba(231, 76, 60, 0.1)', fill: true, tension: 0.3 }, { label: '系统负载 (1min) - CPU活跃进程', data: [], borderColor: '#2980b9', backgroundColor: 'rgba(41, 128, 185, 0.1)', fill: true, tension: 0.3, yAxisID: 'y1' } ] }, options: { responsive: true, maintainAspectRatio: false, animation: false, interaction: { mode: 'index', intersect: false, }, scales: { y: { beginAtZero: true, max: 100, title: { display: true, text: 'Memory %' } }, y1: { type: 'linear', display: true, position: 'right', beginAtZero: true, title: { display: true, text: 'Load Avg' }, grid: { drawOnChartArea: false, }, }, x: { ticks: { display: false } } } } });
+        const ctx2 = document.getElementById('netChart').getContext('2d');
+        netChart = new Chart(ctx2, { type: 'line', data: { labels: [], datasets: [ { label: 'Rx (下载)', data: [], borderColor: '#27ae60', fill: false, tension: 0.3 }, { label: 'Tx (上传)', data: [], borderColor: '#f39c12', fill: false, tension: 0.3 } ] }, options: { responsive: true, maintainAspectRatio: false, animation: false, scales: { y: { beginAtZero: true, title: { display: true, text: 'KB/s' } }, x: { ticks: { display: false } } } } });
+    }
+    function switchTab(id) {
+        document.querySelectorAll('.panel').forEach(p => p.classList.remove('active')); document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('panel-'+id).classList.add('active'); event.target.classList.add('active');
+        if (id === 'terminal') { if (!sysTerm) initSysTerm(); setTimeout(()=>sysFit.fit(), 200); }
+        if (id === 'deploy') { setTimeout(()=>deployFit && deployFit.fit(), 200); }
+        if (id === 'baseservices') { redis.init(); mysql.init(); }
+    }
+    function switchSubTab(event, id, isLink, group) {
+       if (isLink) { document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active')); const mainBtn = Array.from(document.querySelectorAll('.tab-btn')).find(b => b.textContent.includes('基础服务')); if(mainBtn) mainBtn.classList.add('active'); document.querySelectorAll('.panel').forEach(p => p.classList.remove('active')); document.getElementById('panel-baseservices').classList.add('active'); }
+       if(group) { const p = event.target.closest('.card'); p.querySelectorAll('.'+group).forEach(x=>x.style.display='none'); p.querySelectorAll('.sub-tab-btn').forEach(b=>b.classList.remove('active')); document.getElementById(id).style.display='block'; event.target.classList.add('active'); return; } 
+       else { const parent = document.getElementById('panel-baseservices'); parent.querySelectorAll('.sub-panel').forEach(p => p.classList.remove('active')); parent.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active')); document.getElementById(id).classList.add('active'); event.target.classList.add('active'); }
+       if (id === 'bs-rabbitmq') { const frame = document.getElementById('frame-rabbitmq'); if (!frame.src) frame.src = frame.dataset.src; } 
+       else if (id === 'bs-minio') { const frame = document.getElementById('frame-minio'); if (!frame.src) { frame.src = frame.dataset.src; frame.onload = function() { let attempts = 0; const interval = setInterval(() => { attempts++; if(attempts > 40) clearInterval(interval); try { const doc = frame.contentWindow.document; const user = doc.getElementById('accessKey'); const pass = doc.getElementById('secretKey'); const btn = doc.querySelector('button[type="submit"]'); if(user && pass && btn) { const nativeInputValueSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set; nativeInputValueSetter.call(user, 'admin'); user.dispatchEvent(new Event('input', { bubbles: true })); nativeInputValueSetter.call(pass, 'Nqsky1130'); pass.dispatchEvent(new Event('input', { bubbles: true })); setTimeout(() => { btn.click(); }, 300); clearInterval(interval); } } catch(e) {} }, 500); }; } }
+    }
+    function getWsUrl(ep) { let path = location.pathname; if (!path.endsWith('/')) path += '/'; return (location.protocol==='https:'?'wss://':'ws://') + location.host + path + ep; }
+    function viewLog(key, el) {
+        document.querySelectorAll('.log-item').forEach(l=>l.classList.remove('active')); el.classList.add('active'); document.getElementById('logTitle').innerText = "Log: " + key;
+        const box = document.getElementById('logContent'); box.innerText = "Connecting...\n";
+        if(logSocket) logSocket.close();
+        logSocket = new WebSocket(getWsUrl("ws/log?key="+key));
+        logSocket.onmessage = e => { box.innerText += e.data; if(box.innerText.length>50000) box.innerText=box.innerText.substring(box.innerText.length-50000); if(document.getElementById('autoScroll').checked) box.scrollTop=box.scrollHeight; };
+        logSocket.onclose = () => { box.innerText += "\n>>> Disconnected"; };
+    }
+    function dlLog(key, e) { e.stopPropagation(); window.location.href = API_BASE + 'log/download?key=' + key; }
+    function clearLog(){ document.getElementById('logContent').innerText=""; }
+    async function runCheck() {
+        try {
+            const resp = await fetch(API_BASE + 'check'); const data = await resp.json();
+            if(sysChart && data.sys_info.mem_usage !== undefined) {
+                const now = new Date().toLocaleTimeString();
+                if(sysChart.data.labels.length > 20) { sysChart.data.labels.shift(); sysChart.data.datasets.forEach(d => d.data.shift()); netChart.data.labels.shift(); netChart.data.datasets.forEach(d => d.data.shift()); }
+                sysChart.data.labels.push(now); sysChart.data.datasets[0].data.push(data.sys_info.mem_usage); sysChart.data.datasets[1].data.push(data.sys_info.load_avg); sysChart.update();
+                netChart.data.labels.push(now); netChart.data.datasets[0].data.push(data.sys_info.net_rx || 0); netChart.data.datasets[1].data.push(data.sys_info.net_tx || 0); netChart.update();
+            }
+            let baseHtml = '';
+            baseHtml += row('CPU', data.sys_info.cpu_cores + ' 核', data.sys_info.cpu_pass); baseHtml += row('内存', data.sys_info.mem_total, data.sys_info.mem_pass); baseHtml += row('架构', data.sys_info.arch, true); baseHtml += row('操作系统', data.sys_info.os_name, data.sys_info.os_pass);
+            baseHtml += '<tr><td>性能(ulimit)</td><td>'+data.sys_info.ulimit+'</td><td>'+(data.sys_info.ulimit_pass?'<span class="pass">OK</span>':'<span class="warn">Opt</span>')+'</td></tr>';
+            document.getElementById('baseTable').innerHTML = baseHtml;
+            let secHtml = '';
+            secHtml += '<tr><td>SELinux</td><td>'+data.sec_info.selinux+'</td><td>'+(data.sec_info.selinux==="Disabled"||data.sec_info.selinux==="Permissive"?'<span class="pass">OK</span>':'<button class="btn-sm btn-fix" onclick="fixSelinux()">⛔ 关闭</button>')+'</td></tr>';
+            
+            // Firewall Logic Fix
+            let fwStatus = data.sec_info.firewall; // Backend returns "Running" or "Stopped"
+            let fwDisplay = '';
+            if (fwStatus === 'Stopped' || fwStatus === 'Off') {
+                fwDisplay = '<span class="pass">OK</span>';
+            } else {
+                fwDisplay = '<button class="btn-sm btn-fix" onclick="fixFirewall()">⛔ 关闭</button>';
+            }
+            secHtml += '<tr><td>防火墙</td><td>'+fwStatus+'</td><td>'+fwDisplay+'</td></tr>';
+
+            let sshBtn = data.sec_info.ssh_tunnel_ok ? '<span class="pass">开启</span>' : '<span class="fail">关闭</span> <button class="btn-sm btn-fix" onclick="fixSsh()">🔧 修复</button>';
+            secHtml += '<tr><td>SSH隧道</td><td>TCP转发</td><td>'+sshBtn+'</td></tr>';
+            document.getElementById('secTable').innerHTML = secHtml;
+            let diskHtml = '<div style="display:flex; flex-direction:column; gap:12px;">';
+            data.sys_info.disk_list.forEach(d => { let color = d.usage>=90?'bg-red':(d.usage>=75?'bg-orange':'bg-green'); diskHtml += '<div><div style="font-weight:bold;margin-bottom:4px;font-size:13px;">'+d.mount+' <span style="color:#666">('+d.usage+'%)</span></div><div class="progress-bg"><div class="progress-bar '+color+'" style="width:'+d.usage+'%"></div></div><div class="disk-text"><span>'+d.used+'</span><span>'+d.total+'</span></div></div>'; });
+            document.getElementById('diskList').innerHTML = diskHtml + '</div>';
+            const uemBox = document.getElementById('uemStatusBox');
+            if (!data.uem_info.installed) { uemBox.innerHTML = '<div style="color:#7f8c8d;text-align:center;padding:20px;">未检测到 UEM</div>'; } 
+            else { let h = '<table style="width:100%"><thead><tr><th>服务</th><th>状态</th><th>操作</th></tr></thead><tbody>'; data.uem_info.services.forEach(s => { let st = s.status==='running'?'<span class="pass">Run</span>':'<span class="fail">Stop</span>'; h += '<tr><td>'+s.name+'</td><td>'+st+'</td><td><button class="btn-sm btn-restart" onclick="restartService(\''+s.name+'\')">重启</button></td></tr>'; }); uemBox.innerHTML = h + '</tbody></table>'; }
+            let mHtml = !data.minio_info.bucket_exists ? '<tr><td>Err</td><td colspan="2">桶不存在/未连接</td></tr>' : '<tr><td>nqsky</td><td>'+data.minio_info.policy+'</td><td>'+(data.minio_info.policy==='public'?'<span class="pass">OK</span>':'<button class="btn-sm btn-fix" onclick="fixMinio()">Public</button>')+'</td></tr>';
+            document.getElementById('minioTable').innerHTML = mHtml;
+        } catch(e) {}
+    }
+    function row(name, val, pass) { return '<tr><td>'+name+'</td><td>'+val+'</td><td>'+(pass?'<span class="pass">OK</span>':'<span class="fail">Fail</span>')+'</td></tr>'; }
+    async function fixSelinux() { if(confirm("关闭 SELinux (需重启)？")) fetch(API_BASE+'sec/selinux',{method:'POST'}).then(r=>r.text()).then(t=>{ alert(t); runCheck(); }); }
+    async function fixFirewall() { if(confirm("关闭防火墙？")) fetch(API_BASE+'sec/firewall',{method:'POST'}).then(r=>r.text()).then(alert).then(runCheck); }
+    async function restartService(n) { if(confirm('重启 '+n+' ?')) fetch(API_BASE+'service/restart?name='+n,{method:'POST'}).then(r=>r.text()).then(alert).then(runCheck); }
+    async function fixMinio() { if(confirm("Public?")) fetch(API_BASE+'minio/fix',{method:'POST'}).then(r=>r.text()).then(alert).then(runCheck); }
+    async function fixSsh() { if(confirm("Fix SSH?")) fetch(API_BASE+'fix_ssh',{method:'POST'}).then(r=>r.text()).then(alert); }
+    async function fmLoadPath(p) { currentPath=p; document.getElementById('fmPath').innerText=p; const r=await fetch(API_BASE+'fs/list?path='+encodeURIComponent(p)); const fs=await r.json(); let h=''; fs.sort((a,b)=>(a.is_dir===b.is_dir)?0:a.is_dir?-1:1); fs.forEach(f=>{ let n=f.is_dir?'<a class="link-dir" href="javascript:fmLoadPath(\''+f.path+'\')">'+f.name+'</a>':f.name; let act=f.is_dir?'':'<button class="btn-sm" onclick="fmDownload(\''+f.path+'\')">下载</button>'; h+='<tr><td>'+(f.is_dir?'📁':'📄')+' '+n+'</td><td>'+f.size+'</td><td>'+f.mod_time+'</td><td>'+act+'</td></tr>'; }); document.getElementById('fmBody').innerHTML=h; }
+    function fmUpDir() { let p=currentPath.split('/'); p.pop(); let n=p.join('/'); if(!n)n='/'; fmLoadPath(n); }
+    function fmDownload(p) { window.location.href = API_BASE + 'fs/download?path=' + encodeURIComponent(p); }
+    async function fmDoUpload() { const inp=document.getElementById('fmUploadInput'); const fd=new FormData(); fd.append("file", inp.files[0]); fd.append("path", currentPath); const st=document.getElementById('fmStatus'); st.innerText="Uploading..."; await fetch(API_BASE+'upload_any', {method:'POST', body:fd}); st.innerText="Done"; fmLoadPath(currentPath); }
+    async function mountIso() { const inp=document.getElementById('isoInput'); if(!inp.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file",inp.files[0]); const r=await fetch(API_BASE+'iso_mount',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('yum-log'); while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
+    async function mountLocalIso() { const p = document.getElementById('isoPathInput').value; if(!p) return alert("请输入路径"); event.target.disabled=true; const fd=new FormData(); fd.append("path", p); const r=await fetch(API_BASE+'iso_mount_local',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('yum-log'); box.innerText = ">>> 正在使用本地文件挂载...\n"; while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
+    async function installRpm() { const i=document.getElementById('rpmInput'); if(!i.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file",i.files[0]); const r=await fetch(API_BASE+'rpm_install',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('rpm-log'); while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
+    async function uploadFile() { const i=document.getElementById('fileInput'); if(!i.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file", i.files[0]); try { const r=await fetch(UPLOAD_URL, {method:'POST', body:fd}); if(r.ok) { document.getElementById('uploadStatus').innerHTML = "<span class='pass'>✅ 成功</span>"; document.getElementById('btnRunInstall').disabled=false; document.getElementById('btnRunUpdate').disabled=false; } else { throw await r.text(); } } catch(e){alert("Error: "+e);} event.target.disabled=false; }
+    function startScript(type) { if(deployTerm) deployTerm.dispose(); if(deploySocket) deploySocket.close(); deployTerm=new Terminal({cursorBlink:true,fontSize:13,theme:{background:'#000'}}); deployFit=new FitAddon.FitAddon(); deployTerm.loadAddon(deployFit); deployTerm.open(document.getElementById('deploy-term')); deployFit.fit(); deploySocket=new WebSocket(getWsUrl("ws/deploy?type="+type)); setupSocket(deploySocket, deployTerm, deployFit); document.getElementById('btnRunInstall').disabled=true; document.getElementById('btnRunUpdate').disabled=true; }
+    function initSysTerm() { sysTerm=new Terminal({cursorBlink:true,fontSize:14,fontFamily:'Consolas, monospace'}); sysFit=new FitAddon.FitAddon(); sysTerm.loadAddon(sysFit); sysTerm.open(document.getElementById('sys-term')); sysFit.fit(); sysSocket=new WebSocket(getWsUrl("ws/terminal")); setupSocket(sysSocket, sysTerm, sysFit); }
+    function setupSocket(s, t, f) { s.onopen=()=>{s.send(JSON.stringify({type:"resize",cols:t.cols,rows:t.rows}));f.fit()}; s.onmessage=e=>t.write(e.data); t.onData(d=>{if(s.readyState===1)s.send(JSON.stringify({type:"input",data:d}))}); window.addEventListener('resize',()=>{f.fit();if(s.readyState===1)s.send(JSON.stringify({type:"resize",cols:t.cols,rows:t.rows}))}); }
+    function escapeHtml(unsafe) { return unsafe ? unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;") : ''; }
+
+    const redis = {
+       allKeys: [], currentFilter: 'all', initialized: false,
+       init: function() { if(this.initialized) return; this.fetchInfo(); this.fetchAllKeys(); this.initialized = true; },
+       fetchInfo: async function() { try { const res = await fetch(API_BASE + 'baseservices/redis/info'); if (!res.ok) throw new Error('Failed to fetch info'); const info = await res.json(); const metrics = {'redis_version': 'Version', 'uptime_in_days': 'Uptime (Days)', 'connected_clients': 'Clients', 'used_memory_human': 'Memory', 'total_commands_processed': 'Commands', 'instantaneous_ops_per_sec': 'Ops/Sec'}; const grid = document.getElementById('redis-info-grid'); grid.innerHTML = ''; for (const key in metrics) { if (info[key]) grid.innerHTML += '<div class="card"><h3>' + metrics[key] + '</h3><p style="font-size:1.5em;font-weight:bold;">' + info[key] + '</p></div>'; } } catch (e) { document.getElementById('redis-info-grid').innerHTML = '<p class="fail">Failed to load Redis stats.</p>'; } },
+       fetchAllKeys: async function() { try { const res = await fetch(API_BASE + 'baseservices/redis/keys'); if (!res.ok) throw new Error('Failed to fetch keys'); this.allKeys = await res.json() || []; this.allKeys.sort((a, b) => a.key.localeCompare(b.key)); this.renderTable(); } catch (e) { document.getElementById('redis-keys-table-container').innerHTML = '<p class="fail">Failed to load keys.</p>'; } },
+       renderTable: function() { let html = '<table><thead><tr><th>Key</th><th>Type</th><th>Actions</th></tr></thead><tbody>'; this.allKeys.forEach(item => { html += '<tr><td title="' + escapeHtml(item.key) + '">' + escapeHtml(item.key) + '</td><td>' + escapeHtml(item.type) + '</td><td><button class="btn-sm" onclick="redis.viewEditKey(\'' + item.key + '\', \'' + item.type + '\')">View/Edit</button> <button class="btn-sm btn-red" onclick="redis.deleteKey(\'' + item.key + '\')">Delete</button></td></tr>'; }); html += '</tbody></table>'; document.getElementById('redis-keys-table-container').innerHTML = html; },
+       deleteKey: async function(key) { if (!confirm('确认删除: ' + key + '?')) return; await fetch(API_BASE + 'baseservices/redis/key?key=' + encodeURIComponent(key), { method: 'DELETE' }); this.fetchAllKeys(); },
+       viewEditKey: async function(key, type) { document.getElementById('modal-title').textContent = 'Editing ' + type + ': ' + key; document.getElementById('modal-body').innerHTML = '<p>Loading...</p>'; document.getElementById('modal-backdrop').style.display = 'block'; document.getElementById('modal').style.display = 'block'; const res = await fetch(API_BASE + 'baseservices/redis/value?type=' + type + '&key=' + encodeURIComponent(key)); const data = await res.json(); this.renderModalContent(data); },
+       renderModalContent: function(data) {
+          let body = '';
+          switch (data.type) {
+             case 'string': body = '<div class="form-group"><label>Value</label><textarea id="stringValue" rows="5" style="width:100%">' + escapeHtml(data.value) + '</textarea></div><button class="btn-green" onclick="redis.saveStringValue(\'' + data.key + '\')">Save</button>'; break;
+             case 'list': let items = data.value.map(item => '<div class="list-item"><span>' + escapeHtml(item) + '</span><button class="btn-sm btn-red" onclick="redis.deleteListItem(\'' + data.key + '\', \'' + escapeHtml(item) + '\')">Delete</button></div>').join(''); body = '<div class="form-group"><input type="text" id="newListItem" placeholder="New Item" style="width:100%"><button class="btn-green" style="margin-top:10px;" onclick="redis.addListItem(\'' + data.key + '\')">Add</button></div><hr>' + items; break;
+             case 'hash': let fields = Object.entries(data.value).map(([f, v]) => '<div class="hash-item"><span><strong>' + escapeHtml(f) + ':</strong> ' + escapeHtml(v) + '</span><button class="btn-sm btn-red" onclick="redis.deleteHashField(\'' + data.key + '\', \'' + escapeHtml(f) + '\')">Delete</button></div>').join(''); body = '<div class="form-group"><input type="text" id="newHashField" placeholder="Field" style="width:100%"><textarea id="newHashValue" placeholder="Value" style="width:100%"></textarea><button class="btn-green" style="margin-top:10px;" onclick="redis.addHashField(\'' + data.key + '\')">Save</button></div><hr>' + fields; break;
+             default: body = '<p>Unsupported type: ' + data.type + '</p>';
+          }
+          document.getElementById('modal-body').innerHTML = body;
+       },
+       saveStringValue: async function(key) { const value = document.getElementById('stringValue').value; await fetch(API_BASE + 'baseservices/redis/value?type=string&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) }); this.hideModal(); },
+       addListItem: async function(key) { const value = document.getElementById('newListItem').value; if (!value) return; await fetch(API_BASE + 'baseservices/redis/value?type=list&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) }); this.viewEditKey(key, 'list'); },
+       deleteListItem: async function(key, value) { await fetch(API_BASE + 'baseservices/redis/value?type=list&key=' + encodeURIComponent(key) + '&value=' + encodeURIComponent(value), { method: 'DELETE' }); this.viewEditKey(key, 'list'); },
+       addHashField: async function(key) { const field = document.getElementById('newHashField').value; const value = document.getElementById('newHashValue').value; if (!field) return; await fetch(API_BASE + 'baseservices/redis/value?type=hash&key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ field, value }) }); this.viewEditKey(key, 'hash'); },
+       deleteHashField: async function(key, field) { await fetch(API_BASE + 'baseservices/redis/value?type=hash&key=' + encodeURIComponent(key) + '&field=' + encodeURIComponent(field), { method: 'DELETE' }); this.viewEditKey(key, 'hash'); },
+       hideModal: function() { document.getElementById('modal-backdrop').style.display = 'none'; document.getElementById('modal').style.display = 'none'; }
+    };
+    document.getElementById('modal-close-btn').addEventListener('click', () => redis.hideModal());
+    document.getElementById('modal-cancel-btn').addEventListener('click', () => redis.hideModal());
+    document.getElementById('modal-backdrop').addEventListener('click', () => redis.hideModal());
+
+    const mysql = {
+       currentDB: 'mdm', initialized: false, charts: {},
+       init: function() {
+          if(this.initialized) return;
+          this.charts.metric = new Chart(document.getElementById('mysql-metricChart').getContext('2d'), { type: 'line', data: { labels: [], datasets: [{ label: 'Threads', data: [], borderColor: '#2980b9', fill: false }, { label: 'QPS', data: [], borderColor: '#27ae60', fill: false }] }, options: { responsive: true, animation: false } });
+          this.charts.size = new Chart(document.getElementById('mysql-tableSizeChart').getContext('2d'), { type: 'bar', data: { labels: [], datasets: [{ label: 'Size MB', data: [], backgroundColor: 'rgba(52, 152, 219, 0.6)' }] }, options: { responsive: true, indexAxis: 'y' } });
+          this.charts.ops = new Chart(document.getElementById('mysql-tableOpsChart').getContext('2d'), { type: 'bar', data: { labels: [], datasets: [{ label: 'Ops', data: [], backgroundColor: 'rgba(231, 76, 60, 0.6)' }] }, options: { responsive: true, indexAxis: 'y' } });
+          this.charts.repl = new Chart(document.getElementById('mysql-replChart').getContext('2d'), { type: 'line', data: { labels: [], datasets: [{ label: 'Delay(s)', data: [], borderColor: '#c0392b', fill: false }] }, options: { responsive: true, animation: false } });
+          this.loadAll(); setInterval(() => this.loadAll(), 10000); this.initialized = true;
+       },
+       switchDB: function(db) { this.currentDB = db; this.loadAll(); },
+       loadAll: async function() { await Promise.all([ this.loadMetrics(), this.loadTables(), this.loadProcesslist(), this.loadRepl() ]); },
+       loadMetrics: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/metrics/' + this.currentDB); const arr = await res.json(); if (!arr || arr.length === 0) return; const m = arr[0]; document.getElementById('mysql-threads').innerText = m.threads; document.getElementById('mysql-qps').innerText = m.qps; document.getElementById('mysql-connections').innerText = m.max_connections; document.getElementById('mysql-uptime').innerText = m.uptime_str; const now = new Date().toLocaleTimeString(); if (this.charts.metric.data.labels.length > 20) { this.charts.metric.data.labels.shift(); this.charts.metric.data.datasets.forEach(ds => ds.data.shift()); } this.charts.metric.data.labels.push(now); this.charts.metric.data.datasets[0].data.push(m.threads); this.charts.metric.data.datasets[1].data.push(m.qps); this.charts.metric.update(); } catch (e) { console.error('mysql.loadMetrics', e); } },
+       loadTables: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/tables/' + this.currentDB); const data = await res.json(); if (!Array.isArray(data)) return; this.charts.size.data.labels = data.map(d => d.name); this.charts.size.data.datasets[0].data = data.map(d => d.size_mb); this.charts.size.update(); this.charts.ops.data.labels = data.map(d => d.name); this.charts.ops.data.datasets[0].data = data.map(d => d.ops); this.charts.ops.update(); } catch (e) { console.error('mysql.loadTables', e); } },
+       loadProcesslist: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/processlist/' + this.currentDB); const data = await res.json(); const filter = document.getElementById('mysql-slowFilter').value.toLowerCase(); const tbody = document.querySelector('#mysql-slowQueryTable tbody'); tbody.innerHTML = ''; (data || []).forEach(q => { if (filter && (!q.info || !q.info.toLowerCase().includes(filter))) return; tbody.innerHTML += '<tr><td>' + q.id + '</td><td>' + q.user + '</td><td>' + q.host + '</td><td>' + q.db + '</td><td>' + q.command + '</td><td>' + q.time + '</td><td>' + q.state + '</td><td>' + escapeHtml(q.info) + '</td></tr>'; }); } catch (e) { console.error('mysql.loadProcesslist', e); } },
+       loadRepl: async function() { try { const res = await fetch(API_BASE + 'baseservices/mysql/replstatus/' + this.currentDB); const r = await res.json(); document.getElementById('mysql-replStatus').innerHTML = 'Role: ' + r.role + ' | Slave Running: <span class="' + (r.slave_running ? 'pass' : 'fail') + '">' + r.slave_running + '</span> | Delay(s): ' + r.seconds_behind; if (this.charts.repl.data.labels.length > 20) { this.charts.repl.data.labels.shift(); this.charts.repl.data.datasets[0].data.shift(); } this.charts.repl.data.labels.push(new Date().toLocaleTimeString()); this.charts.repl.data.datasets[0].data.push(r.seconds_behind || 0); this.charts.repl.update(); } catch (e) { console.error('mysql.loadRepl', e); } },
+       execSQL: async function() { const sql = document.getElementById('mysql-sqlInput').value.trim(); if (!sql) return; const res = await fetch(API_BASE + 'baseservices/mysql/execsql/' + this.currentDB, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sql }) }); const result = await res.json(); const div = document.getElementById('mysql-sqlResult'); if(result.error) { div.innerHTML = '<div style="color:red; padding:10px;">Error: ' + escapeHtml(result.error) + '</div>'; return; } if(!result.columns || result.columns.length === 0) { div.innerHTML = '<div style="padding:10px; color:#666;">Query executed successfully. No rows returned.</div>'; return; } let tableHtml = '<table class="sql-table"><thead><tr>'; result.columns.forEach(col => { tableHtml += '<th>' + escapeHtml(col) + '</th>'; }); tableHtml += '</tr></thead><tbody>'; if(result.rows) { result.rows.forEach(row => { tableHtml += '<tr>'; row.forEach(cell => { tableHtml += '<td>' + escapeHtml(cell) + '</td>'; }); tableHtml += '</tr>'; }); } tableHtml += '</tbody></table>'; div.innerHTML = tableHtml; }
+    };
+</script>
+</body>
+</html>
+`
