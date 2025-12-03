@@ -43,6 +43,7 @@ var (
 	IsoMountPoint   = "/mnt/cdrom"
 	RepoBackupDir   = "/etc/yum.repos.d/backup_cncy"
 
+	// MinIO API (SDK检测用)
 	MinioEndpoint = "127.0.0.1:9000"
 	MinioUser     = "admin"
 	MinioPass     = "Nqsky1130"
@@ -54,14 +55,13 @@ var uemServices = []string{
 	"nginx", "redis", "mysqld", "minio", "rabbitmq-server", "scep-go",
 }
 
+// 日志映射表，nginx 路径将在 initLogPaths 中动态确定
 var logFileMap = map[string]string{
-	"tomcat":       "/opt/emm/current/tomcat/logs/catalina.out",
-	"nginx_access": "/var/log/nginx/access.log",
-	"nginx_error":  "/var/log/nginx/error.log",
-	"app_server":   "/emm/logs/AppServer/appServer.log",
-	"emm_backend":  "/emm/logs/emm_backend/emmBackend.log",
-	"license":      "/emm/logs/licenseServer/licenseServer.log",
-	"platform":     "/emm/logs/platform/platform.log",
+	"tomcat":      "/opt/emm/current/tomcat/logs/catalina.out",
+	"app_server":  "/emm/logs/AppServer/appServer.log",
+	"emm_backend": "/emm/logs/emm_backend/emmBackend.log",
+	"license":     "/emm/logs/licenseServer/licenseServer.log",
+	"platform":    "/emm/logs/platform/platform.log",
 }
 
 // --- BaseServices Structs ---
@@ -77,7 +77,7 @@ type Config struct {
 	MtenantJdbcPassword string `properties:"jdbc.multitenant.password"`
 	RabbitMQAddresses   string `properties:"spring.rabbitmq.addresses"`
 	RabbitMQAdminPort   int    `properties:"rabbitmq.admin.port,default=15672"`
-	MinioURL            string `properties:"storage.minio.url"`
+	MinioURL            string `properties:"storage.minio.url"` // 配置文件中的URL
 }
 
 type Metric struct {
@@ -140,16 +140,28 @@ const htmlPage = `
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
+        /* 全局布局：Flex Column */
         body { font-family: 'Segoe UI', sans-serif; background: #2c3e50; margin: 0; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
-        .navbar { background: #34495e; padding: 0 20px; height: 50px; display: flex; align-items: center; border-bottom: 1px solid #1abc9c; }
+        
+        /* 顶部导航：固定高度 */
+        .navbar { background: #34495e; padding: 0 20px; height: 50px; display: flex; align-items: center; border-bottom: 1px solid #1abc9c; flex-shrink: 0; }
         .brand { color: #fff; font-weight: bold; font-size: 18px; margin-right: 20px; }
         .tab-btn { background: transparent; border: none; color: #bdc3c7; font-size: 13px; padding: 0 10px; height: 100%; cursor: pointer; transition: 0.3s; border-bottom: 3px solid transparent; }
         .tab-btn:hover { color: white; background: rgba(255,255,255,0.05); }
         .tab-btn.active { color: #1abc9c; border-bottom: 3px solid #1abc9c; background: rgba(26, 188, 156, 0.1); }
-        .content { flex: 1; position: relative; background: #ecf0f1; overflow-y: auto; }
-        .panel { display: none; width: 100%; min-height: 100%; padding: 20px; box-sizing: border-box; }
+        
+        /* 主内容区域：占据剩余空间，禁止 Body 滚动，由子 Panel 处理滚动 */
+        .content { flex: 1; position: relative; background: #ecf0f1; overflow: hidden; display: flex; flex-direction: column; }
+        
+        /* 面板通用样式：默认隐藏，激活显示 */
+        .panel { display: none; width: 100%; height: 100%; padding: 20px; box-sizing: border-box; overflow-y: auto; }
         .panel.active { display: block; }
-        .container-box { padding: 20px; max-width: 1200px; margin: 0 auto; width: 100%; box-sizing: border-box; display: flex; flex-direction: column; height: 100%; }
+        
+        /* 特殊处理基础服务面板：使用 Flex 布局以支持全屏 iframe */
+        #panel-baseservices { padding: 0; display: none; flex-direction: column; height: 100%; overflow: hidden; }
+        #panel-baseservices.active { display: flex; }
+        
+        .container-box { padding: 20px; max-width: 1200px; margin: 0 auto; width: 100%; box-sizing: border-box; }
         .card { background: white; padding: 15px; border-radius: 6px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); margin-bottom: 15px; display: flex; flex-direction: column; }
         h3 { margin-top: 0; border-bottom: 2px solid #eee; padding-bottom: 10px; color: #2c3e50; display: flex; justify-content: space-between; align-items: center; font-size: 16px; }
         .term-box { flex: 1; background: #1e1e1e; padding: 10px; overflow-y: auto; border-radius: 6px; color: #0f0; font-family: Consolas, monospace; font-size: 13px; white-space: pre-wrap; border: 1px solid #333; }
@@ -193,10 +205,17 @@ const htmlPage = `
         .grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; }
         .about-table td { padding: 10px; }
         .about-table tr:not(:last-child) td { border-bottom: 1px solid #f0f0f0; }
-       .sub-tab-btn { background: #e9ecef; color: #666; border: 1px solid #ddd; padding: 8px 14px; cursor: pointer; }
-       .sub-tab-btn.active { background: #fff; border-bottom-color: #fff; color: #2980b9; font-weight: bold; }
-       .sub-panel { display: none; border: 1px solid #ddd; border-top: none; padding: 15px; background: #fff; }
-       .sub-panel.active { display: block; }
+       
+       /* 基础服务子标签样式 */
+       .bs-header { padding: 10px 20px; background: #e9ecef; display: flex; gap: 5px; border-bottom: 1px solid #ddd; flex-shrink: 0; }
+       .sub-tab-btn { background: #fff; color: #666; border: 1px solid #ddd; padding: 6px 14px; cursor: pointer; border-radius: 4px; font-size: 13px; }
+       .sub-tab-btn:hover { background: #f8f9fa; }
+       .sub-tab-btn.active { background: #2980b9; color: white; border-color: #2980b9; }
+       
+       /* 子面板样式：撑满剩余空间，内容可滚动 */
+       .sub-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; background: #fff; width: 100%; height: 100%; }
+       .sub-panel.active { display: flex; }
+       
        .modal-backdrop { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.5); z-index: 100; display: none; }
         .modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background-color: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 5px 15px rgba(0,0,0,0.3); z-index: 101; width: 90%; max-width: 700px; display: none; max-height: 80vh; overflow-y: auto; }
         .modal-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #dee2e6; padding-bottom: 10px; margin-bottom: 20px; }
@@ -205,6 +224,9 @@ const htmlPage = `
         .modal-body { margin-bottom: 20px; }
         .modal-footer { border-top: 1px solid #dee2e6; padding-top: 15px; margin-top: 20px; text-align: right; }
        .list-item, .hash-item { display: flex; justify-content: space-between; align-items: center; padding: 8px; border-bottom: 1px solid #e9ecef; }
+       
+       /* iframe 容器：flex: 1 撑满高度，无边框 */
+       .iframe-container { flex: 1; width: 100%; height: 100%; border: none; display: block; }
     </style>
 </head>
 <body>
@@ -241,21 +263,15 @@ const htmlPage = `
     <div id="panel-logs" class="panel" style="padding:20px;height:100%"><div class="log-layout"><div class="log-sidebar"><div class="log-sidebar-header">日志列表</div><ul class="log-list"><li class="log-item" onclick="viewLog('tomcat', this)"><span>Tomcat</span> <button class="btn-dl-log" onclick="dlLog('tomcat', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('nginx_access', this)"><span>Nginx Access</span> <button class="btn-dl-log" onclick="dlLog('nginx_access', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('nginx_error', this)"><span>Nginx Error</span> <button class="btn-dl-log" onclick="dlLog('nginx_error', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('app_server', this)"><span>App Server</span> <button class="btn-dl-log" onclick="dlLog('app_server', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('emm_backend', this)"><span>EMM Backend</span> <button class="btn-dl-log" onclick="dlLog('emm_backend', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('license', this)"><span>License</span> <button class="btn-dl-log" onclick="dlLog('license', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('platform', this)"><span>Platform</span> <button class="btn-dl-log" onclick="dlLog('platform', event)"><i class="fas fa-download"></i></button></li></ul></div><div class="log-viewer-container"><div class="log-viewer-header"><span id="logTitle">请选择...</span><div><label><input type="checkbox" id="autoScroll" checked> 自动滚动</label> <button class="btn-sm" onclick="clearLog()">清空</button></div></div><div id="logContent" class="log-content"></div></div></div></div>
     
     <div id="panel-baseservices" class="panel">
-       <div class="container-box">
-          <div style="margin-bottom: 15px;">
-             <button class="sub-tab-btn active" onclick="switchSubTab(event, 'bs-overview')">概览</button>
-             <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-redis')">Redis</button>
-             <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-mysql')">MySQL</button>
-          </div>
-          <div id="bs-overview" class="sub-panel active">
-             <div class="grid-4">
-                <div class="card"><a href="javascript:switchSubTab(event, 'bs-redis', true)"><h3>Redis 管理</h3><p>Key/Value 查看、编辑、删除</p></a></div>
-                <div class="card"><a href="javascript:switchSubTab(event, 'bs-mysql', true)"><h3>MySQL 监控</h3><p>性能图表、进程、SQL执行</p></a></div>
-                <div class="card"><a href="/api/baseservices/rabbitmq" target="_blank"><h3>RabbitMQ</h3><p>原生管理后台 (新窗口打开)</p></a></div>
-                <div class="card"><a href="/api/baseservices/minio" target="_blank"><h3>MinIO</h3><p>原生管理后台 (新窗口打开)</p></a></div>
-             </div>
-          </div>
-          <div id="bs-redis" class="sub-panel">
+       <div class="bs-header">
+           <button class="sub-tab-btn active" onclick="switchSubTab(event, 'bs-redis')">Redis</button>
+           <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-mysql')">MySQL</button>
+           <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-rabbitmq')">RabbitMQ</button>
+           <button class="sub-tab-btn" onclick="switchSubTab(event, 'bs-minio')">MinIO</button>
+       </div>
+       
+       <div id="bs-redis" class="sub-panel active" style="padding: 20px; overflow-y: auto;">
+           <div class="container-box" style="padding:0">
              <div class="card">
                 <h3>Redis 性能指标</h3>
                 <div id="redis-info-grid" class="grid-4">加载中...</div>
@@ -264,8 +280,11 @@ const htmlPage = `
                 <h3>键值管理</h3>
                 <div id="redis-keys-table-container">加载中...</div>
              </div>
-          </div>
-          <div id="bs-mysql" class="sub-panel">
+           </div>
+       </div>
+
+       <div id="bs-mysql" class="sub-panel" style="padding: 20px; overflow-y: auto;">
+           <div class="container-box" style="padding:0">
              <div class="card">
                 <div style="display:flex; align-items:center; gap:15px; margin-bottom:15px;">
                    <h3>MySQL 监控</h3>
@@ -299,7 +318,15 @@ const htmlPage = `
                    <pre id="mysql-sqlResult" class="term-box" style="margin-top:10px;"></pre>
                 </div>
              </div>
-          </div>
+           </div>
+       </div>
+
+       <div id="bs-rabbitmq" class="sub-panel" style="padding: 0;">
+           <iframe id="frame-rabbitmq" data-src="/api/baseservices/rabbitmq/" class="iframe-container"></iframe>
+       </div>
+
+       <div id="bs-minio" class="sub-panel" style="padding: 0;">
+           <iframe id="frame-minio" data-src="/api/baseservices/minio/" class="iframe-container"></iframe>
        </div>
     </div>
 
@@ -310,9 +337,9 @@ const htmlPage = `
                 <table class="about-table">
                     <tbody>
                         <tr><td style="width: 100px;"><strong>作者</strong></td><td>王凯</td></tr>
-                        <tr><td><strong>版本</strong></td><td>3.3 (Fixed)</td></tr>
+                        <tr><td><strong>版本</strong></td><td>3.6 (MinIO Console Fix)</td></tr>
                         <tr><td><strong>更新日期</strong></td><td>2024-07-26</td></tr>
-                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端</li><li>实时查看多种 UEM 服务日志</li><li>基础服务(Redis/MySQL)监控与管理</li></ul></td></tr>
+                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端</li><li>实时查看多种 UEM 服务日志</li><li>基础服务(Redis/MySQL/RabbitMQ/MinIO)监控与管理</li></ul></td></tr>
                     </tbody>
                 </table>
             </div>
@@ -350,15 +377,31 @@ const htmlPage = `
           document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
           document.getElementById('panel-baseservices').classList.add('active');
        }
-       const parent = event.target.closest('.panel, .card');
-       const scope = group ? parent.querySelectorAll('.'+group) : parent.querySelectorAll('.sub-panel');
-       scope.forEach(p => { p.style.display = 'none'; p.classList.remove('active'); });
-       const targetPanel = document.getElementById(id);
-       if(targetPanel) { targetPanel.style.display = 'block'; targetPanel.classList.add('active'); }
+       // Logic to toggle sub-panels inside panel-baseservices
+       const parent = document.getElementById('panel-baseservices');
+       parent.querySelectorAll('.sub-panel').forEach(p => p.classList.remove('active'));
+       parent.querySelectorAll('.sub-tab-btn').forEach(b => b.classList.remove('active'));
        
-       const btnScope = group ? parent.querySelectorAll('.sub-tab-btn[onclick*="'+group+'"]') : parent.querySelectorAll('.sub-tab-btn');
-       btnScope.forEach(b => b.classList.remove('active'));
+       if(group) { // for mysql internal tabs
+           const p = event.target.closest('.card');
+           p.querySelectorAll('.'+group).forEach(x=>x.style.display='none');
+           p.querySelectorAll('.sub-tab-btn').forEach(b=>b.classList.remove('active'));
+           document.getElementById(id).style.display='block';
+           event.target.classList.add('active');
+           return;
+       }
+
+       document.getElementById(id).classList.add('active');
        event.target.classList.add('active');
+
+       // Lazy load iframes
+       if (id === 'bs-rabbitmq') {
+           const frame = document.getElementById('frame-rabbitmq');
+           if (!frame.src) frame.src = frame.dataset.src;
+       } else if (id === 'bs-minio') {
+           const frame = document.getElementById('frame-minio');
+           if (!frame.src) frame.src = frame.dataset.src;
+       }
     }
     function getWsUrl(ep) { return (location.protocol==='https:'?'wss://':'ws://') + location.host + location.pathname + ep; }
     function viewLog(key, el) {
@@ -660,6 +703,9 @@ func main() {
 	os.MkdirAll(RpmCacheDir, 0755)
 	autoFixSshConfig()
 
+	// 初始化日志路径
+	initLogPaths()
+
 	// Init Base Services
 	loadConfig()
 	initRedis()
@@ -706,6 +752,23 @@ func main() {
 
 	fmt.Printf("Agent running on %s\n", ServerPort)
 	http.ListenAndServe("0.0.0.0:"+ServerPort, nil)
+}
+
+// 动态检测日志路径
+func initLogPaths() {
+	// Helper to check file existence
+	resolveLog := func(primary, fallback string) string {
+		if _, err := os.Stat(primary); err == nil {
+			return primary
+		}
+		if _, err := os.Stat(fallback); err == nil {
+			return fallback
+		}
+		return primary // Default to primary even if missing
+	}
+
+	logFileMap["nginx_access"] = resolveLog("/var/log/nginx/access.log", "/usr/local/nginx/logs/access.log")
+	logFileMap["nginx_error"] = resolveLog("/var/log/nginx/error.log", "/usr/local/nginx/logs/error.log")
 }
 
 // --- BaseServices Core Logic ---
@@ -784,12 +847,21 @@ func initMySQL() {
 	}
 }
 func setupProxies(basePath string) {
-	redirectHTML := `<!DOCTYPE html><html><head><title>Redirecting...</title><script>window.location.replace(window.location.pathname + "/");</script></head><body><p>Redirecting...</p></body></html>`
+	// 简单的加载中页面，无多余文字
+	redirectHTML := `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Loading...</title><style>body{margin:0;display:flex;justify-content:center;align-items:center;height:100vh;background:#f5f7fa;color:#666;font-family:sans-serif;}</style><script>window.location.replace(window.location.pathname + "/");</script></head><body><div style="text-align:center">Loading Interface...</div></body></html>`
+
+	// 定义修改响应头的函数，去除X-Frame-Options以允许iframe嵌入
+	modifyFunc := func(r *http.Response) error {
+		r.Header.Del("X-Frame-Options")
+		r.Header.Del("Content-Security-Policy")
+		return nil
+	}
 
 	// RabbitMQ Proxy
 	if appConfig.RabbitMQAdminPort > 0 {
 		rabbitURL, _ := url.Parse(fmt.Sprintf("http://127.0.0.1:%d", appConfig.RabbitMQAdminPort))
 		rabbitProxy := httputil.NewSingleHostReverseProxy(rabbitURL)
+		rabbitProxy.ModifyResponse = modifyFunc
 		http.Handle(basePath+"/rabbitmq/", http.StripPrefix(basePath+"/rabbitmq", rabbitProxy))
 		http.HandleFunc(basePath+"/rabbitmq", func(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(redirectHTML))
@@ -797,17 +869,33 @@ func setupProxies(basePath string) {
 		log.Printf("Enabled RabbitMQ proxy")
 	}
 
-	// MinIO Proxy
-	if appConfig.MinioURL != "" {
-		minioURL, err := url.Parse(appConfig.MinioURL)
-		if err == nil {
-			minioProxy := httputil.NewSingleHostReverseProxy(minioURL)
-			http.Handle(basePath+"/minio/", http.StripPrefix(basePath+"/minio", minioProxy))
-			http.HandleFunc(basePath+"/minio", func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte(redirectHTML))
-			})
-			log.Printf("Enabled MinIO proxy to %s", appConfig.MinioURL)
+	// MinIO Proxy (Console Port 9001)
+	targetMinio := "http://127.0.0.1:9001"
+	// 如果配置文件中显式配置了URL且端口不是9000（API），则使用配置的
+	if appConfig.MinioURL != "" && !strings.Contains(appConfig.MinioURL, ":9000") {
+		targetMinio = appConfig.MinioURL
+	}
+
+	minioURL, err := url.Parse(targetMinio)
+	if err == nil {
+		minioProxy := httputil.NewSingleHostReverseProxy(minioURL)
+		minioProxy.ModifyResponse = modifyFunc
+
+		// 1. MinIO 基础代理入口
+		http.Handle(basePath+"/minio/", http.StripPrefix(basePath+"/minio", minioProxy))
+
+		// 2. MinIO Console 资源劫持 (解决 Unexpected token < 问题)
+		// MinIO Console 前端使用绝对路径请求资源，导致请求落到 Agent 的 "/" 路由
+		// 这里我们需要把这些特定的资源路径也代理给 MinIO
+		minioAssets := []string{"/static/", "/login", "/api/v1/", "/ws/", "/images/", "/styles/", "/loader.css"}
+		for _, path := range minioAssets {
+			http.Handle(path, minioProxy)
 		}
+
+		http.HandleFunc(basePath+"/minio", func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte(redirectHTML))
+		})
+		log.Printf("Enabled MinIO proxy to %s", targetMinio)
 	}
 }
 
