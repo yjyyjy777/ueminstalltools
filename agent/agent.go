@@ -33,12 +33,12 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// ================= 1. 配置区域 =================
+// ================= 1. 全局配置与变量 =================
 var (
 	ServerPort      string
 	UploadTargetDir = "/root"
 	RpmCacheDir     = "/root/rpm_cache"
-	InstallWorkDir  = "/root/install-cncy"
+	InstallWorkDir  = "/root/install-cncy" // 默认工作目录
 	InstallScript   = "install.sh"
 	UpdateScript    = "mdm.sh"
 	IsoSavePath     = "/root/os.iso"
@@ -65,7 +65,6 @@ var logFileMap = map[string]string{
 	"platform":    "/emm/logs/platform/platform.log",
 }
 
-// --- BaseServices Structs ---
 type Config struct {
 	RedisHost           string `properties:"system.redis.host"`
 	RedisPort           int    `properties:"system.redis.port"`
@@ -207,13 +206,12 @@ func main() {
 	os.MkdirAll(RpmCacheDir, 0755)
 	autoFixSshConfig()
 
-	// 2. 确保其他初始化逻辑保留
 	initLogPaths()
 	loadConfig()
 	initRedis()
 	initMySQL()
 
-	// 3. 路由注册
+	// 路由注册
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte(htmlPage))
@@ -232,7 +230,12 @@ func main() {
 	http.HandleFunc("/api/iso_mount", handleIsoMount)
 	http.HandleFunc("/api/iso_mount_local", handleIsoMountLocal)
 	http.HandleFunc("/api/log/download", handleLogDownload)
-	http.HandleFunc("/ws/deploy", handleDeployWS)
+
+	// === 核心修改部分 ===
+	http.HandleFunc("/api/check_dir", handleCheckDir) // 检测目录及脚本
+	http.HandleFunc("/ws/deploy", handleDeployWS)     // 支持参数的部署WS
+	// =================
+
 	http.HandleFunc("/ws/terminal", handleSysTermWS)
 	http.HandleFunc("/ws/log", handleLogWS)
 	bsAPI := "/api/baseservices"
@@ -249,6 +252,80 @@ func main() {
 
 	fmt.Printf("Agent running on %s\n", ServerPort)
 	http.ListenAndServe("0.0.0.0:"+ServerPort, nil)
+}
+
+// === 新增：检测目录及脚本状态 ===
+func handleCheckDir(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Query().Get("path")
+	cleanPath := filepath.Clean(path)
+
+	res := map[string]interface{}{
+		"exists":      false,
+		"has_install": false,
+		"has_mdm":     false,
+		"debug_msg":   "",
+	}
+
+	if cleanPath == "" || cleanPath == "." {
+		res["debug_msg"] = "路径为空"
+		json.NewEncoder(w).Encode(res)
+		return
+	}
+
+	info, err := os.Stat(cleanPath)
+	if err != nil || !info.IsDir() {
+		res["debug_msg"] = "目录不存在"
+		json.NewEncoder(w).Encode(res)
+		return
+	}
+
+	res["exists"] = true
+
+	// 检查 install.sh
+	if _, err := os.Stat(filepath.Join(cleanPath, InstallScript)); err == nil {
+		res["has_install"] = true
+	}
+
+	// 检查 mdm.sh
+	if _, err := os.Stat(filepath.Join(cleanPath, UpdateScript)); err == nil {
+		res["has_mdm"] = true
+	} else {
+		res["debug_msg"] = fmt.Sprintf("未找到 %s", UpdateScript)
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(res)
+}
+
+// === 修改：部署WS，支持参数 (webui, tomcat) ===
+func handleDeployWS(w http.ResponseWriter, r *http.Request) {
+	// 1. 获取工作目录 (默认为 InstallWorkDir)
+	workDir := r.URL.Query().Get("path")
+	if workDir == "" {
+		workDir = InstallWorkDir
+	}
+
+	// 2. 获取参数
+	deployType := r.URL.Query().Get("type") // install 或 update
+	scriptArg := r.URL.Query().Get("arg")   // webui, tomcat, uem
+
+	var cmd *exec.Cmd
+
+	if deployType == "install" {
+		cmd = exec.Command("/bin/bash", filepath.Join(workDir, InstallScript))
+	} else {
+		// update 类型
+		scriptPath := filepath.Join(workDir, UpdateScript)
+		if scriptArg != "" {
+			// 如果有参数，执行: bash mdm.sh <arg>
+			cmd = exec.Command("/bin/bash", scriptPath, scriptArg)
+		} else {
+			// 默认行为
+			cmd = exec.Command("/bin/bash", scriptPath, "uem")
+		}
+	}
+
+	startPTYSession(w, r, cmd)
 }
 
 // Helper Functions
@@ -272,14 +349,11 @@ func loadConfig() {
 	var p *properties.Properties
 	var err error
 	if _, err = os.Stat(prodPath); err == nil {
-		log.Printf("Loading config: %s", prodPath)
 		p, err = properties.LoadFile(prodPath, properties.UTF8)
 	} else {
-		log.Printf("Loading local config: %s", localPath)
 		p, err = properties.LoadFile(localPath, properties.UTF8)
 	}
 	if err != nil {
-		log.Printf("Warning: Config error: %v", err)
 		return
 	}
 	if err := p.Decode(&appConfig); err != nil {
@@ -289,23 +363,18 @@ func loadConfig() {
 
 func initRedis() {
 	if appConfig.RedisHost == "" {
-		log.Println("Redis skipped.")
 		return
 	}
 	addr := fmt.Sprintf("%s:%d", appConfig.RedisHost, appConfig.RedisPort)
 	rdb = redis.NewClient(&redis.Options{Addr: addr, Password: appConfig.RedisPassword, DB: 0})
 	if _, err := rdb.Ping(ctx).Result(); err != nil {
-		log.Printf("Redis connect fail: %v", err)
 		rdb = nil
-	} else {
-		log.Println("Redis connected.")
 	}
 }
 
 func initMySQL() {
 	dbConnections = make(map[string]*sql.DB)
 	if appConfig.MdmJdbcURL == "" {
-		log.Println("MySQL skipped.")
 		return
 	}
 	configs := map[string]map[string]string{
@@ -327,18 +396,15 @@ func initMySQL() {
 		}
 		db, err := sql.Open("mysql", dsn)
 		if err != nil {
-			log.Printf("MySQL %s open error: %v", dbName, err)
 			continue
 		}
 		db.SetConnMaxLifetime(time.Minute * 3)
 		db.SetMaxOpenConns(10)
 		db.SetMaxIdleConns(5)
 		if err = db.Ping(); err != nil {
-			log.Printf("MySQL %s ping error: %v", dbName, err)
 			continue
 		}
 		dbConnections[dbName] = db
-		log.Printf("MySQL %s connected", dbName)
 	}
 }
 
@@ -391,7 +457,6 @@ func setupProxies(basePath string) {
 			req.Host = minioURL.Host
 			req.Header.Del("Accept-Encoding")
 			path := req.URL.Path
-			// Smart Path Rewrite logic for MinIO Deep Linking
 			if idx := strings.LastIndex(path, "/static/"); idx != -1 {
 				req.URL.Path = path[idx:]
 			} else if idx := strings.LastIndex(path, "/api/v1/"); idx != -1 {
@@ -410,7 +475,6 @@ func setupProxies(basePath string) {
 				req.URL.Path = strings.TrimPrefix(path, basePath+"/minio")
 			}
 		}
-		// WebSocket specific proxy for MinIO
 		minioWsProxy := httputil.NewSingleHostReverseProxy(minioURL)
 		minioWsProxy.Director = func(req *http.Request) {
 			req.URL.Scheme = minioURL.Scheme
@@ -951,31 +1015,26 @@ func autoFixSshConfig() error {
 
 	updated := false
 
-	// 1. 如果发现 "#AllowTcpForwarding yes"，改为 "AllowTcpForwarding yes"
 	if strings.Contains(content, "#AllowTcpForwarding yes") {
 		content = strings.ReplaceAll(content, "#AllowTcpForwarding yes", "AllowTcpForwarding yes")
 		updated = true
 	}
 
-	// 2. 如果既没有 AllowTcpForwarding yes，也没有 AllowTcpForwarding no，则追加
 	if !strings.Contains(content, "AllowTcpForwarding yes") &&
 		!strings.Contains(content, "AllowTcpForwarding no") {
 		content += "\nAllowTcpForwarding yes\n"
 		updated = true
 	}
 
-	// 没有变动，不需要写回与重启
 	if !updated {
 		return nil
 	}
 
-	// 3. 写回配置文件
 	err = os.WriteFile(cfgPath, []byte(content), 0644)
 	if err != nil {
 		return fmt.Errorf("write sshd_config failed: %w", err)
 	}
 
-	// 4. 重启 sshd
 	if err := exec.Command("systemctl", "restart", "sshd").Run(); err != nil {
 		return fmt.Errorf("restart sshd failed: %w", err)
 	}
@@ -1063,15 +1122,6 @@ func handleRpmInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	c.Wait()
 	fmt.Fprintf(w, "Done.\n")
-}
-
-func handleDeployWS(w http.ResponseWriter, r *http.Request) {
-	startPTYSession(w, r, exec.Command("/bin/bash", filepath.Join(InstallWorkDir, func() string {
-		if r.URL.Query().Get("type") == "install" {
-			return InstallScript
-		}
-		return UpdateScript
-	}())))
 }
 
 func handleSysTermWS(w http.ResponseWriter, r *http.Request) {
@@ -1204,15 +1254,10 @@ func getNetIO() (float64, float64) {
 		if len(f) < 10 {
 			continue
 		}
-		// Basic heuristic to skip headers and loopback if needed
 		if strings.Contains(f[0], ":") || len(f) > 16 {
-			// Parsing can be tricky depending on spacing.
-			// Usually field 1 is bytes received, field 9 is bytes transmitted
-			// But if interface name is stuck to bytes (eth0:123), we need to handle it
 			rStr := f[1]
 			tStr := f[9]
 			if strings.Contains(f[0], ":") && len(f) < 17 {
-				// Format: eth0:123 456 ...
 				parts := strings.Split(f[0], ":")
 				if len(parts) > 1 {
 					rStr = parts[1]
@@ -1254,7 +1299,6 @@ func formatBytes(b int64) string {
 	return fmt.Sprintf("%.1f%cB", float64(b)/float64(d), "KMGTPE"[e])
 }
 
-// ================= 2. 前端页面 =================
 const htmlPage = `
 <!DOCTYPE html>
 <html lang="zh-CN">
@@ -1262,6 +1306,7 @@ const htmlPage = `
     <meta charset="UTF-8">
     <title>综合运维平台</title>
     <script>
+        // 防止相对路径资源加载错误，强制 URL 以 / 结尾
         if (!window.location.pathname.endsWith('/') && !window.location.pathname.endsWith('.html')) {
             var newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname + "/" + window.location.search;
             window.history.replaceState(null, null, newUrl);
@@ -1313,7 +1358,7 @@ const htmlPage = `
         .log-viewer-header { padding: 5px 10px; background: #2c3e50; color: #ecf0f1; font-size: 12px; display: flex; justify-content: space-between; align-items: center; }
         .log-content { flex: 1; overflow-y: auto; padding: 10px; font-family: 'Consolas', monospace; font-size: 12px; color: #dcdcdc; white-space: pre-wrap; word-break: break-all; }
         button { background: #2980b9; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: 0.2s; }
-        button:hover { background: #3498db; } button:disabled { background: #95a5a6; cursor: not-allowed; }
+        button:hover { background: #3498db; } button:disabled { background: #95a5a6; cursor: not-allowed; opacity: 0.6; }
         .btn-sm { padding: 4px 8px; font-size: 12px; } 
         .btn-fix { background: #e67e22; } .btn-fix:hover { background: #d35400; }
         .btn-green { background: #27ae60; } .btn-green:hover { background: #219150; }
@@ -1392,7 +1437,60 @@ const htmlPage = `
     
     <div id="panel-deps" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card"><h3>💿 ISO 挂载 (配置本地 YUM)</h3><div style="display:flex; flex-direction:column; gap:10px;"><div style="display:flex; align-items:center; gap:10px;"><span style="width:80px; color:#666;">上传镜像:</span><input type="file" id="isoInput" accept=".iso" style="width:300px;"><button onclick="mountIso()">上传并挂载</button></div><div style="display:flex; align-items:center; gap:10px;"><span style="width:80px; color:#666;">本地路径:</span><input type="text" id="isoPathInput" placeholder="/tmp/kylin.iso" style="width:300px;"><button class="btn-orange" onclick="mountLocalIso()">使用本地文件</button></div></div><div id="yum-log" class="term-box" style="height:120px;margin-top:10px">等待操作...</div></div><div class="card"><h3>🛠️ RPM 安装</h3><div style="display:flex;gap:10px"><input type="file" id="rpmInput" accept=".rpm"><button onclick="installRpm()">执行安装</button></div><div id="rpm-log" class="term-box" style="height:120px;margin-top:10px"></div></div></div></div>
     
-    <div id="panel-deploy" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card"><h3>📦 系统包上传</h3><div style="display:flex;gap:10px"><input type="file" id="fileInput" accept=".tar.gz"><button onclick="uploadFile()">上传解压</button><span id="uploadStatus" style="font-weight:bold"></span></div></div><div class="card" style="flex:1"><div style="display:flex;justify-content:space-between;margin-bottom:10px;align-items:center"><h3>脚本执行</h3><div style="display:flex;gap:10px"><button id="btnRunInstall" class="btn-green" onclick="startScript('install')" disabled>部署 (install.sh)</button> <button id="btnRunUpdate" class="btn-orange" onclick="startScript('update')" disabled>更新 (mdm.sh)</button></div></div><div id="deploy-term" style="height:400px;background:#000"></div></div></div></div>
+    <div id="panel-deploy" class="panel">
+        <div class="container-box" style="max-width: 1000px;">
+            
+            <div class="card">
+                <h3>📂 1. 设置工作目录</h3>
+                <div style="display:flex; gap:10px; align-items:center;">
+                    <span style="color:#666; font-size:13px;">路径:</span>
+                    <input type="text" id="manualPathInput" placeholder="/root/install-cncy" value="/root/install-cncy" style="flex:1; font-family:monospace;">
+                    <button class="btn-orange" onclick="checkManualPath()">检测脚本</button>
+                </div>
+                <div id="pathCheckMsg" style="margin-top:5px; font-size:12px; height:18px;"></div>
+            </div>
+
+            <div class="card">
+                <h3>📤 2. 上传更新包 (上传后自动解压)</h3>
+                <div style="background:#f8f9fa; padding:10px; border-radius:4px; font-size:12px; color:#666; margin-bottom:10px; line-height: 1.6;">
+                    <strong>请根据更新类型上传对应文件：</strong><br>
+                    1. 更新 WebUI &nbsp;&nbsp;➔ 上传 <code>WebUI.tar.gz</code><br>
+                    2. 更新 Tomcat ➔ 上传 <code>apache-tomcat-*.zip</code><br>
+                    3. 全量更新 UEM ➔ 上传 <code>UEM-*.tar.gz</code>
+                </div>
+                <div style="display:flex;gap:10px;align-items:center">
+                    <input type="file" id="fileInput">
+                    <button onclick="uploadFile()">上传到服务器</button>
+                    <span id="uploadStatus" style="font-weight:bold"></span>
+                </div>
+            </div>
+
+            <div class="card" style="flex:1">
+                <h3>🚀 3. 执行操作</h3>
+                
+                <div style="display:grid; grid-template-columns: repeat(4, 1fr); gap:10px; margin-bottom:15px;">
+                    <button id="btnInstall" class="btn-green" onclick="startScript('install')" disabled>
+                        <i class="fas fa-play"></i> 首次部署<br><span style="font-size:10px; opacity:0.8">(install.sh)</span>
+                    </button>
+                    
+                    <button id="btnUEM" class="btn-red" onclick="startScript('update', 'uem')" disabled>
+                        <i class="fas fa-sync"></i> 更新 UEM<br><span style="font-size:10px; opacity:0.8">(mdm.sh uem)</span>
+                    </button>
+                    
+                    <button id="btnWebUI" class="btn-orange" onclick="startScript('update', 'webui')" disabled>
+                        <i class="fas fa-columns"></i> 更新 WebUI<br><span style="font-size:10px; opacity:0.8">(mdm.sh webui)</span>
+                    </button>
+                    
+                    <button id="btnTomcat" class="btn-orange" onclick="startScript('update', 'tomcat')" disabled>
+                        <i class="fas fa-server"></i> 更新 Tomcat<br><span style="font-size:10px; opacity:0.8">(mdm.sh tomcat)</span>
+                    </button>
+                </div>
+
+                <div id="deploy-term" style="height:400px;background:#000;border-radius:4px;"></div>
+            </div>
+        </div>
+    </div>
+
     <div id="panel-files" class="panel"><div class="container-box" style="max-width: 1000px;"><div class="card" style="height:100%;padding:0"><div style="padding:15px;background:#f8f9fa;border-bottom:1px solid #eee"><div class="fm-toolbar"><button onclick="fmUpDir()">上级</button><button onclick="fmRefresh()">刷新</button><span id="fmPath" style="margin:0 10px;font-weight:bold">/root</span><input type="file" id="fmUploadInput" style="display:none" onchange="fmDoUpload()"><button onclick="document.getElementById('fmUploadInput').click()">上传</button></div><div id="fmStatus" style="font-size:12px;color:#666;height:15px"></div></div><div class="fm-list" style="overflow:auto;height:100%"><table style="width:100%"><tbody id="fmBody"></tbody></table></div></div></div></div>
     <div id="panel-terminal" class="panel"><div id="sys-term" class="full-term" style="height:100vh"></div></div>
     <div id="panel-logs" class="panel" style="padding:20px;height:100%"><div class="log-layout"><div class="log-sidebar"><div class="log-sidebar-header">日志列表</div><ul class="log-list"><li class="log-item" onclick="viewLog('tomcat', this)"><span>Tomcat</span> <button class="btn-dl-log" onclick="dlLog('tomcat', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('nginx_access', this)"><span>Nginx Access</span> <button class="btn-dl-log" onclick="dlLog('nginx_access', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('nginx_error', this)"><span>Nginx Error</span> <button class="btn-dl-log" onclick="dlLog('nginx_error', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('app_server', this)"><span>App Server</span> <button class="btn-dl-log" onclick="dlLog('app_server', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('emm_backend', this)"><span>EMM Backend</span> <button class="btn-dl-log" onclick="dlLog('emm_backend', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('license', this)"><span>License</span> <button class="btn-dl-log" onclick="dlLog('license', event)"><i class="fas fa-download"></i></button></li><li class="log-item" onclick="viewLog('platform', this)"><span>Platform</span> <button class="btn-dl-log" onclick="dlLog('platform', event)"><i class="fas fa-download"></i></button></li></ul></div><div class="log-viewer-container"><div class="log-viewer-header"><span id="logTitle">请选择...</span><div><label><input type="checkbox" id="autoScroll" checked> 自动滚动</label> <button class="btn-sm" onclick="clearLog()">清空</button></div></div><div id="logContent" class="log-content"></div></div></div></div>
@@ -1472,9 +1570,9 @@ const htmlPage = `
                 <table class="about-table">
                     <tbody>
                         <tr><td style="width: 100px;"><strong>作者</strong></td><td>王凯</td></tr>
-                        <tr><td><strong>版本</strong></td><td>5.4 (Stable PTY)</td></tr>
+                        <tr><td><strong>版本</strong></td><td>5.6 (Component Update)</td></tr>
                         <tr><td><strong>更新日期</strong></td><td>2024-07-26</td></tr>
-                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li><strong>新功能：实时系统资源（内存/负载/网络）监控图表</strong></li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li>上传部署包并执行安装/更新脚本</li><li>图形化文件管理（浏览、上传、下载）</li><li>全功能网页 Shell 终端 (Fix PTY)</li><li>实时查看多种 UEM 服务日志</li><li>基础服务(Redis/MySQL/RabbitMQ/MinIO)监控与管理</li></ul></td></tr>
+                        <tr><td style="vertical-align: top; padding-top: 12px;"><strong>主要功能</strong></td><td><ul style="margin:0; padding-left: 20px; line-height: 1.8;"><li>系统基础环境、安全配置、服务状态一键体检</li><li>实时系统资源（内存/负载/网络）监控图表</li><li>通过上传或本地路径挂载 ISO 镜像，自动配置 YUM 源</li><li>在线安装 RPM 依赖包</li><li><strong>新功能：WebUI 和 Tomcat 独立更新支持</strong></li><li>指定服务器目录进行部署/更新（免重复上传）</li><li>全功能网页 Shell 终端 (Fix PTY)</li><li>实时查看多种 UEM 服务日志</li><li>基础服务(Redis/MySQL/RabbitMQ/MinIO)监控与管理</li></ul></td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1530,60 +1628,113 @@ const htmlPage = `
     }
     function dlLog(key, e) { e.stopPropagation(); window.location.href = API_BASE + 'log/download?key=' + key; }
     function clearLog(){ document.getElementById('logContent').innerText=""; }
-    async function runCheck() {
-        try {
-            const resp = await fetch(API_BASE + 'check'); const data = await resp.json();
-            if(sysChart && data.sys_info.mem_usage !== undefined) {
-                const now = new Date().toLocaleTimeString();
-                if(sysChart.data.labels.length > 20) { sysChart.data.labels.shift(); sysChart.data.datasets.forEach(d => d.data.shift()); netChart.data.labels.shift(); netChart.data.datasets.forEach(d => d.data.shift()); }
-                sysChart.data.labels.push(now); sysChart.data.datasets[0].data.push(data.sys_info.mem_usage); sysChart.data.datasets[1].data.push(data.sys_info.load_avg); sysChart.update();
-                netChart.data.labels.push(now); netChart.data.datasets[0].data.push(data.sys_info.net_rx || 0); netChart.data.datasets[1].data.push(data.sys_info.net_tx || 0); netChart.update();
-            }
-            let baseHtml = '';
-            baseHtml += row('CPU', data.sys_info.cpu_cores + ' 核', data.sys_info.cpu_pass); baseHtml += row('内存', data.sys_info.mem_total, data.sys_info.mem_pass); baseHtml += row('架构', data.sys_info.arch, true); baseHtml += row('操作系统', data.sys_info.os_name, data.sys_info.os_pass);
-            baseHtml += '<tr><td>性能(ulimit)</td><td>'+data.sys_info.ulimit+'</td><td>'+(data.sys_info.ulimit_pass?'<span class="pass">OK</span>':'<span class="warn">Opt</span>')+'</td></tr>';
-            document.getElementById('baseTable').innerHTML = baseHtml;
-            let secHtml = '';
-            secHtml += '<tr><td>SELinux</td><td>'+data.sec_info.selinux+'</td><td>'+(data.sec_info.selinux==="Disabled"||data.sec_info.selinux==="Permissive"?'<span class="pass">OK</span>':'<button class="btn-sm btn-fix" onclick="fixSelinux()">⛔ 关闭</button>')+'</td></tr>';
-            
-            // Firewall Logic Fix
-            let fwStatus = data.sec_info.firewall; // Backend returns "Running" or "Stopped"
-            let fwDisplay = '';
-            if (fwStatus === 'Stopped' || fwStatus === 'Off') {
-                fwDisplay = '<span class="pass">OK</span>';
-            } else {
-                fwDisplay = '<button class="btn-sm btn-fix" onclick="fixFirewall()">⛔ 关闭</button>';
-            }
-            secHtml += '<tr><td>防火墙</td><td>'+fwStatus+'</td><td>'+fwDisplay+'</td></tr>';
+    
+    // ==========================================
+    // 核心逻辑：目录检测与按钮控制
+    // ==========================================
+    async function checkManualPath() {
+        const path = document.getElementById('manualPathInput').value.trim();
+        const msgBox = document.getElementById('pathCheckMsg');
+        
+        const btnInstall = document.getElementById('btnInstall');
+        const btnUEM = document.getElementById('btnUEM');
+        const btnWebUI = document.getElementById('btnWebUI');
+        const btnTomcat = document.getElementById('btnTomcat');
 
-            let sshBtn = data.sec_info.ssh_tunnel_ok ? '<span class="pass">开启</span>' : '<span class="fail">关闭</span> <button class="btn-sm btn-fix" onclick="fixSsh()">🔧 修复</button>';
-            secHtml += '<tr><td>SSH隧道</td><td>TCP转发</td><td>'+sshBtn+'</td></tr>';
-            document.getElementById('secTable').innerHTML = secHtml;
-            let diskHtml = '<div style="display:flex; flex-direction:column; gap:12px;">';
-            data.sys_info.disk_list.forEach(d => { let color = d.usage>=90?'bg-red':(d.usage>=75?'bg-orange':'bg-green'); diskHtml += '<div><div style="font-weight:bold;margin-bottom:4px;font-size:13px;">'+d.mount+' <span style="color:#666">('+d.usage+'%)</span></div><div class="progress-bg"><div class="progress-bar '+color+'" style="width:'+d.usage+'%"></div></div><div class="disk-text"><span>'+d.used+'</span><span>'+d.total+'</span></div></div>'; });
-            document.getElementById('diskList').innerHTML = diskHtml + '</div>';
-            const uemBox = document.getElementById('uemStatusBox');
-            if (!data.uem_info.installed) { uemBox.innerHTML = '<div style="color:#7f8c8d;text-align:center;padding:20px;">未检测到 UEM</div>'; } 
-            else { let h = '<table style="width:100%"><thead><tr><th>服务</th><th>状态</th><th>操作</th></tr></thead><tbody>'; data.uem_info.services.forEach(s => { let st = s.status==='running'?'<span class="pass">Run</span>':'<span class="fail">Stop</span>'; h += '<tr><td>'+s.name+'</td><td>'+st+'</td><td><button class="btn-sm btn-restart" onclick="restartService(\''+s.name+'\')">重启</button></td></tr>'; }); uemBox.innerHTML = h + '</tbody></table>'; }
-            let mHtml = !data.minio_info.bucket_exists ? '<tr><td>Err</td><td colspan="2">桶不存在/未连接</td></tr>' : '<tr><td>nqsky</td><td>'+data.minio_info.policy+'</td><td>'+(data.minio_info.policy==='public'?'<span class="pass">OK</span>':'<button class="btn-sm btn-fix" onclick="fixMinio()">Public</button>')+'</td></tr>';
-            document.getElementById('minioTable').innerHTML = mHtml;
-        } catch(e) {}
+        // 先全部禁用
+        [btnInstall, btnUEM, btnWebUI, btnTomcat].forEach(b => b.disabled = true);
+
+        if (!path) {
+            msgBox.innerHTML = '<span class="fail">请输入路径</span>';
+            return;
+        }
+        msgBox.innerHTML = '正在检测...';
+
+        try {
+            const res = await fetch(API_BASE + 'check_dir?path=' + encodeURIComponent(path));
+            const data = await res.json();
+
+            if (data.exists) {
+                let info = '<span class="pass">目录存在。</span> ';
+                let foundScript = false;
+
+                if (data.has_install) {
+                    btnInstall.disabled = false;
+                    info += '✅ install.sh ';
+                    foundScript = true;
+                }
+
+                if (data.has_mdm) {
+                    btnUEM.disabled = false;
+                    btnWebUI.disabled = false;
+                    btnTomcat.disabled = false;
+                    info += '✅ mdm.sh (支持更新) ';
+                    foundScript = true;
+                }
+
+                if (!foundScript) {
+                     info += '<span class="warn">未找到 install.sh 或 mdm.sh</span><br><span class="fail" style="font-size:11px;">' + (data.debug_msg||"") + '</span>';
+                }
+                msgBox.innerHTML = info;
+            } else {
+                msgBox.innerHTML = '<span class="fail">目录不存在 (' + (data.debug_msg || "") + ')</span>';
+            }
+        } catch (e) {
+            console.error(e);
+            msgBox.innerHTML = '<span class="fail">检测请求失败</span>';
+        }
     }
-    function row(name, val, pass) { return '<tr><td>'+name+'</td><td>'+val+'</td><td>'+(pass?'<span class="pass">OK</span>':'<span class="fail">Fail</span>')+'</td></tr>'; }
-    async function fixSelinux() { if(confirm("关闭 SELinux (需重启)？")) fetch(API_BASE+'sec/selinux',{method:'POST'}).then(r=>r.text()).then(t=>{ alert(t); runCheck(); }); }
-    async function fixFirewall() { if(confirm("关闭防火墙？")) fetch(API_BASE+'sec/firewall',{method:'POST'}).then(r=>r.text()).then(alert).then(runCheck); }
-    async function restartService(n) { if(confirm('重启 '+n+' ?')) fetch(API_BASE+'service/restart?name='+n,{method:'POST'}).then(r=>r.text()).then(alert).then(runCheck); }
-    async function fixMinio() { if(confirm("Public?")) fetch(API_BASE+'minio/fix',{method:'POST'}).then(r=>r.text()).then(alert).then(runCheck); }
-    async function fixSsh() { if(confirm("Fix SSH?")) fetch(API_BASE+'fix_ssh',{method:'POST'}).then(r=>r.text()).then(alert); }
-    async function fmLoadPath(p) { currentPath=p; document.getElementById('fmPath').innerText=p; const r=await fetch(API_BASE+'fs/list?path='+encodeURIComponent(p)); const fs=await r.json(); let h=''; fs.sort((a,b)=>(a.is_dir===b.is_dir)?0:a.is_dir?-1:1); fs.forEach(f=>{ let n=f.is_dir?'<a class="link-dir" href="javascript:fmLoadPath(\''+f.path+'\')">'+f.name+'</a>':f.name; let act=f.is_dir?'':'<button class="btn-sm" onclick="fmDownload(\''+f.path+'\')">下载</button>'; h+='<tr><td>'+(f.is_dir?'📁':'📄')+' '+n+'</td><td>'+f.size+'</td><td>'+f.mod_time+'</td><td>'+act+'</td></tr>'; }); document.getElementById('fmBody').innerHTML=h; }
-    function fmUpDir() { let p=currentPath.split('/'); p.pop(); let n=p.join('/'); if(!n)n='/'; fmLoadPath(n); }
-    function fmDownload(p) { window.location.href = API_BASE + 'fs/download?path=' + encodeURIComponent(p); }
-    async function fmDoUpload() { const inp=document.getElementById('fmUploadInput'); const fd=new FormData(); fd.append("file", inp.files[0]); fd.append("path", currentPath); const st=document.getElementById('fmStatus'); st.innerText="Uploading..."; await fetch(API_BASE+'upload_any', {method:'POST', body:fd}); st.innerText="Done"; fmLoadPath(currentPath); }
-    async function mountIso() { const inp=document.getElementById('isoInput'); if(!inp.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file",inp.files[0]); const r=await fetch(API_BASE+'iso_mount',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('yum-log'); while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
-    async function mountLocalIso() { const p = document.getElementById('isoPathInput').value; if(!p) return alert("请输入路径"); event.target.disabled=true; const fd=new FormData(); fd.append("path", p); const r=await fetch(API_BASE+'iso_mount_local',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('yum-log'); box.innerText = ">>> 正在使用本地文件挂载...\n"; while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
-    async function installRpm() { const i=document.getElementById('rpmInput'); if(!i.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file",i.files[0]); const r=await fetch(API_BASE+'rpm_install',{method:'POST',body:fd}); const rd=r.body.getReader(); const d=new TextDecoder(); const box=document.getElementById('rpm-log'); while(true){const{done,value}=await rd.read();if(done)break;box.innerText+=d.decode(value);box.scrollTop=box.scrollHeight;} event.target.disabled=false; }
-    async function uploadFile() { const i=document.getElementById('fileInput'); if(!i.files.length)return; event.target.disabled=true; const fd=new FormData(); fd.append("file", i.files[0]); try { const r=await fetch(UPLOAD_URL, {method:'POST', body:fd}); if(r.ok) { document.getElementById('uploadStatus').innerHTML = "<span class='pass'>✅ 成功</span>"; document.getElementById('btnRunInstall').disabled=false; document.getElementById('btnRunUpdate').disabled=false; } else { throw await r.text(); } } catch(e){alert("Error: "+e);} event.target.disabled=false; }
-    function startScript(type) { if(deployTerm) deployTerm.dispose(); if(deploySocket) deploySocket.close(); deployTerm=new Terminal({cursorBlink:true,fontSize:13,theme:{background:'#000'}}); deployFit=new FitAddon.FitAddon(); deployTerm.loadAddon(deployFit); deployTerm.open(document.getElementById('deploy-term')); deployFit.fit(); deploySocket=new WebSocket(getWsUrl("ws/deploy?type="+type)); setupSocket(deploySocket, deployTerm, deployFit); document.getElementById('btnRunInstall').disabled=true; document.getElementById('btnRunUpdate').disabled=true; }
+
+    // ==========================================
+    // 核心逻辑：上传成功后自动检测
+    // ==========================================
+    async function uploadFile() { 
+        const i=document.getElementById('fileInput'); 
+        if(!i.files.length)return; 
+        event.target.disabled=true; 
+        const fd=new FormData(); 
+        fd.append("file", i.files[0]); 
+        try { 
+            const r=await fetch(UPLOAD_URL, {method:'POST', body:fd}); 
+            if(r.ok) { 
+                document.getElementById('uploadStatus').innerHTML = "<span class='pass'>✅ 成功</span>"; 
+                checkManualPath(); // 自动检测
+            } else { 
+                throw await r.text(); 
+            } 
+        } catch(e){
+            alert("Error: "+e);
+        } 
+        event.target.disabled=false; 
+    }
+
+    // ==========================================
+    // 核心逻辑：启动脚本 (带参数)
+    // ==========================================
+    function startScript(type, arg) { 
+        const path = document.getElementById('manualPathInput').value.trim();
+        
+        if(deployTerm) deployTerm.dispose(); 
+        if(deploySocket) deploySocket.close(); 
+        
+        deployTerm = new Terminal({cursorBlink:true, fontSize:13, theme:{background:'#000'}}); 
+        deployFit = new FitAddon.FitAddon(); 
+        deployTerm.loadAddon(deployFit); 
+        deployTerm.open(document.getElementById('deploy-term')); 
+        deployFit.fit(); 
+        
+        let wsUrl = "ws/deploy?type=" + type + "&path=" + encodeURIComponent(path);
+        if (arg) {
+            wsUrl += "&arg=" + arg;
+        }
+        
+        deploySocket = new WebSocket(getWsUrl(wsUrl)); 
+        setupSocket(deploySocket, deployTerm, deployFit); 
+        
+        const btns = document.querySelectorAll('#panel-deploy button');
+        btns.forEach(b => b.disabled = true);
+    }
+
     function initSysTerm() { sysTerm=new Terminal({cursorBlink:true,fontSize:14,fontFamily:'Consolas, monospace'}); sysFit=new FitAddon.FitAddon(); sysTerm.loadAddon(sysFit); sysTerm.open(document.getElementById('sys-term')); sysFit.fit(); sysSocket=new WebSocket(getWsUrl("ws/terminal")); setupSocket(sysSocket, sysTerm, sysFit); }
     function setupSocket(s, t, f) { s.onopen=()=>{s.send(JSON.stringify({type:"resize",cols:t.cols,rows:t.rows}));f.fit()}; s.onmessage=e=>t.write(e.data); t.onData(d=>{if(s.readyState===1)s.send(JSON.stringify({type:"input",data:d}))}); window.addEventListener('resize',()=>{f.fit();if(s.readyState===1)s.send(JSON.stringify({type:"resize",cols:t.cols,rows:t.rows}))}); }
     function escapeHtml(unsafe) { return unsafe ? unsafe.toString().replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;") : ''; }
